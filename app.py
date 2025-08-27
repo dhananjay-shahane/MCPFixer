@@ -56,7 +56,7 @@ def chat():
         
         # Get Ollama URL from environment or use default
         ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
-        ollama_client = OllamaClient(model="llama3.2", base_url=ollama_url)
+        ollama_client = OllamaClient(model="llama3.2:1b", base_url=ollama_url)
         
         # Process query with Ollama
         response = ollama_client.process_query(user_query)
