@@ -61,107 +61,204 @@ def index():
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Process natural language chat queries"""
+    """Process natural language chat queries using MCP server"""
     try:
-        from server.server import read_csv, get_data_stats, generate_chart, list_data_files, get_column_info, filter_data
+        from server.server import read_csv, get_data_stats, generate_chart, list_data_files, get_column_info, filter_data, execute_script
         
         data = request.get_json()
         user_query = data.get('message', '')
+        tool_name = data.get('tool_name', None)
+        tool_params = data.get('tool_params', {})
         
-        if not user_query:
-            return jsonify({'error': 'Message is required'}), 400
+        if not user_query and not tool_name:
+            return jsonify({'error': 'Message or tool name is required'}), 400
         
         tool_result = None
         tool_used = None
         tool_parameters = None
         ai_response = ""
         
-        # Parse user query for tool requests
-        query_lower = user_query.lower()
-        
-        if "read" in query_lower and "csv" in query_lower:
-            # Extract filename from query
-            words = user_query.split()
-            csv_file = None
-            for word in words:
-                if word.endswith('.csv'):
-                    csv_file = word
-                    break
-            
-            if not csv_file:
-                # Check for common file patterns
-                for filename in ["employee_data.csv", "sales_data.csv", "sample_data.csv", "inventory_data.csv"]:
-                    if filename.replace("_", " ").replace(".csv", "") in query_lower:
-                        csv_file = filename
-                        break
-            
-            if csv_file:
-                tool_parameters = {"filename": csv_file}
-                tool_result = read_csv(csv_file)
-                tool_used = "read_csv"
-                ai_response = f"Reading {csv_file} from the data directory."
-            else:
-                ai_response = "Please specify a CSV filename. Available files can be found in the data directory."
-        
-        elif "chart" in query_lower or "visualiz" in query_lower or "graph" in query_lower:
-            # Handle chart generation
-            chart_type = "bar"
-            if "pie" in query_lower:
-                chart_type = "pie"
-            elif "line" in query_lower:
-                chart_type = "line"
-            elif "scatter" in query_lower:
-                chart_type = "scatter"
-            
-            # Extract CSV file
-            csv_file = "sample_data.csv"
-            words = user_query.split()
-            for word in words:
-                if word.endswith('.csv'):
-                    csv_file = word
-                    break
-            
+        # Direct tool execution if tool_name is provided
+        if tool_name:
             try:
-                import pandas as pd
-                df = pd.read_csv(f"data/{csv_file}")
-                columns = list(df.columns)
-                x_axis = columns[0] if len(columns) > 0 else "x"
-                y_axis = columns[1] if len(columns) > 1 else columns[0]
-                
-                tool_parameters = {
-                    "data_source": csv_file,
-                    "chart_type": chart_type,
-                    "title": f"{chart_type.title()} Chart from {csv_file}",
-                    "x_axis": x_axis,
-                    "y_axis": y_axis
-                }
-                tool_result = generate_chart(csv_file, chart_type, tool_parameters["title"], x_axis, y_axis)
-                tool_used = "generate_chart"
-                ai_response = f"Creating a {chart_type} chart from {csv_file}."
+                if tool_name == "read_csv":
+                    filename = tool_params.get('filename', '')
+                    if filename:
+                        tool_result = read_csv(filename)
+                        tool_used = "read_csv"
+                        tool_parameters = {"filename": filename}
+                        ai_response = f"Reading {filename} from the data directory."
+                    else:
+                        ai_response = "Please provide a filename parameter."
+                        
+                elif tool_name == "get_data_stats":
+                    data_source = tool_params.get('data_source', '')
+                    if data_source:
+                        tool_result = get_data_stats(data_source)
+                        tool_used = "get_data_stats"
+                        tool_parameters = {"data_source": data_source}
+                        ai_response = f"Getting statistics for {data_source}."
+                    else:
+                        ai_response = "Please provide a data_source parameter."
+                        
+                elif tool_name == "generate_chart":
+                    data_source = tool_params.get('data_source', '')
+                    chart_type = tool_params.get('chart_type', 'bar')
+                    title = tool_params.get('title', 'Chart')
+                    x_axis = tool_params.get('x_axis', 'x')
+                    y_axis = tool_params.get('y_axis', 'y')
+                    
+                    if data_source:
+                        tool_result = generate_chart(data_source, chart_type, title, x_axis, y_axis)
+                        tool_used = "generate_chart"
+                        tool_parameters = tool_params
+                        ai_response = f"Creating a {chart_type} chart from {data_source}."
+                    else:
+                        ai_response = "Please provide a data_source parameter."
+                        
+                elif tool_name == "get_column_info":
+                    data_source = tool_params.get('data_source', '')
+                    column = tool_params.get('column', None)
+                    if data_source:
+                        tool_result = get_column_info(data_source, column)
+                        tool_used = "get_column_info"
+                        tool_parameters = tool_params
+                        ai_response = f"Getting column information for {data_source}."
+                    else:
+                        ai_response = "Please provide a data_source parameter."
+                        
+                elif tool_name == "filter_data":
+                    data_source = tool_params.get('data_source', '')
+                    column = tool_params.get('column', '')
+                    value = tool_params.get('value', '')
+                    operation = tool_params.get('operation', 'equals')
+                    
+                    if data_source and column and value:
+                        tool_result = filter_data(data_source, column, value, operation)
+                        tool_used = "filter_data"
+                        tool_parameters = tool_params
+                        ai_response = f"Filtering {data_source} where {column} {operation} {value}."
+                    else:
+                        ai_response = "Please provide data_source, column, and value parameters."
+                        
+                elif tool_name == "list_data_files":
+                    tool_result = list_data_files()
+                    tool_used = "list_data_files"
+                    tool_parameters = {}
+                    ai_response = "Listing all available CSV files in the data directory."
+                    
+                elif tool_name == "execute_script":
+                    script_name = tool_params.get('script_name', '')
+                    csv_file = tool_params.get('csv_file', '')
+                    args = tool_params.get('args', '')
+                    
+                    if script_name and csv_file:
+                        tool_result = execute_script(script_name, csv_file, args)
+                        tool_used = "execute_script"
+                        tool_parameters = tool_params
+                        ai_response = f"Executing {script_name} with {csv_file}."
+                    else:
+                        ai_response = "Please provide script_name and csv_file parameters."
+                        
+                else:
+                    ai_response = f"Unknown tool: {tool_name}"
+                    
             except Exception as e:
-                ai_response = f"Error creating chart: {str(e)}"
-        
-        elif "stats" in query_lower or "statistics" in query_lower or "analyze" in query_lower:
-            # Handle statistics requests
-            csv_file = "sample_data.csv"
-            words = user_query.split()
-            for word in words:
-                if word.endswith('.csv'):
-                    csv_file = word
-                    break
-            
-            tool_parameters = {"data_source": csv_file}
-            tool_result = get_data_stats(csv_file)
-            tool_used = "get_data_stats"
-            ai_response = f"Getting statistics for {csv_file}."
-        
-        elif "list" in query_lower and "file" in query_lower:
-            tool_result = list_data_files()
-            tool_used = "list_data_files"
-            ai_response = "Listing all available CSV files in the data directory."
+                ai_response = f"Error executing {tool_name}: {str(e)}"
         
         else:
-            ai_response = "I can help you analyze CSV data. Try:\n• 'read filename.csv' - to view file contents\n• 'create a chart from filename.csv' - to generate visualizations\n• 'get stats for filename.csv' - for data analysis\n• 'list files' - to see available data files"
+            # Natural language processing with intelligent tool selection
+            query_lower = user_query.lower()
+            
+            # Get available files first
+            available_files = []
+            try:
+                file_list_result = list_data_files()
+                if file_list_result:
+                    import json
+                    files_data = json.loads(file_list_result)
+                    available_files = files_data.get('available_files', [])
+            except:
+                available_files = [f for f in os.listdir('data') if f.endswith('.csv')] if os.path.exists('data') else []
+            
+            # Smart file detection
+            detected_file = None
+            for word in user_query.split():
+                if word.endswith('.csv') and word in available_files:
+                    detected_file = word
+                    break
+            
+            # If no specific file mentioned, try to match patterns
+            if not detected_file:
+                for file in available_files:
+                    file_base = file.replace('_', ' ').replace('.csv', '').lower()
+                    if file_base in query_lower or any(part in query_lower for part in file_base.split()):
+                        detected_file = file
+                        break
+            
+            # Tool selection based on query intent
+            if any(word in query_lower for word in ['read', 'show', 'display', 'view', 'content']):
+                if detected_file:
+                    tool_result = read_csv(detected_file)
+                    tool_used = "read_csv"
+                    tool_parameters = {"filename": detected_file}
+                    ai_response = f"Reading {detected_file} from the data directory."
+                else:
+                    ai_response = f"Please specify which file to read. Available files: {', '.join(available_files)}"
+                    
+            elif any(word in query_lower for word in ['chart', 'graph', 'plot', 'visualiz']):
+                if detected_file:
+                    chart_type = 'bar'
+                    if 'pie' in query_lower: chart_type = 'pie'
+                    elif 'line' in query_lower: chart_type = 'line'
+                    elif 'scatter' in query_lower: chart_type = 'scatter'
+                    
+                    # Try to get column info for smart defaults
+                    try:
+                        import pandas as pd
+                        df = pd.read_csv(f"data/{detected_file}")
+                        columns = list(df.columns)
+                        x_axis = columns[0] if columns else 'x'
+                        y_axis = columns[1] if len(columns) > 1 else columns[0]
+                        
+                        tool_result = generate_chart(detected_file, chart_type, f"{chart_type.title()} Chart", x_axis, y_axis)
+                        tool_used = "generate_chart"
+                        tool_parameters = {"data_source": detected_file, "chart_type": chart_type, "x_axis": x_axis, "y_axis": y_axis}
+                        ai_response = f"Creating a {chart_type} chart from {detected_file}."
+                    except Exception as e:
+                        ai_response = f"Error creating chart: {str(e)}"
+                else:
+                    ai_response = f"Please specify which file to chart. Available files: {', '.join(available_files)}"
+                    
+            elif any(word in query_lower for word in ['stats', 'statistics', 'analyze', 'summary']):
+                if detected_file:
+                    tool_result = get_data_stats(detected_file)
+                    tool_used = "get_data_stats"
+                    tool_parameters = {"data_source": detected_file}
+                    ai_response = f"Getting comprehensive statistics for {detected_file}."
+                else:
+                    ai_response = f"Please specify which file to analyze. Available files: {', '.join(available_files)}"
+                    
+            elif any(word in query_lower for word in ['column', 'field', 'info']):
+                if detected_file:
+                    tool_result = get_column_info(detected_file)
+                    tool_used = "get_column_info"
+                    tool_parameters = {"data_source": detected_file}
+                    ai_response = f"Getting column information for {detected_file}."
+                else:
+                    ai_response = f"Please specify which file to examine. Available files: {', '.join(available_files)}"
+                    
+            elif any(word in query_lower for word in ['list', 'files', 'available']):
+                tool_result = list_data_files()
+                tool_used = "list_data_files"
+                tool_parameters = {}
+                ai_response = "Here are all available CSV files in the data directory."
+                
+            else:
+                tool_result = list_data_files()
+                tool_used = "list_data_files"
+                tool_parameters = {}
+                ai_response = f"I can help you analyze CSV data. Available files: {', '.join(available_files)}. Try asking to 'read', 'chart', or 'analyze' a specific file."
         
         return jsonify({
             'success': True,

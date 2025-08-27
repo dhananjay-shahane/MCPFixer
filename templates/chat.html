@@ -129,6 +129,80 @@
             bottom: 10px;
             text-align: center;
         }
+        .gear-button {
+            background: #6c757d;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            color: white;
+            font-size: 16px;
+            transition: all 0.3s;
+            margin-right: 5px;
+        }
+        .gear-button:hover {
+            background: #5a6268;
+            transform: rotate(90deg);
+        }
+        .tools-panel {
+            position: absolute;
+            bottom: 60px;
+            right: 20px;
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 15px;
+            padding: 15px;
+            max-width: 400px;
+            max-height: 300px;
+            overflow-y: auto;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            z-index: 1000;
+            display: none;
+        }
+        .tool-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .tool-item:hover {
+            background: #e9ecef;
+        }
+        .tool-name {
+            font-weight: bold;
+            color: #495057;
+        }
+        .tool-desc {
+            font-size: 0.8em;
+            color: #6c757d;
+            margin-top: 3px;
+        }
+        .use-tool-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 5px;
+            font-size: 0.8em;
+        }
+        .file-list {
+            background: #e8f4fd;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        .file-item {
+            padding: 5px;
+            margin: 2px 0;
+            background: white;
+            border-radius: 5px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -158,7 +232,44 @@
         </div>
         
         <div class="chat-input-container">
+            <div class="tools-panel" id="toolsPanel">
+                <h6><i class="fas fa-tools"></i> Available Tools</h6>
+                <div id="toolsList">
+                    {% for tool, desc in tools.items() %}
+                    <div class="tool-item" data-tool="{{ tool }}">
+                        <div>
+                            <div class="tool-name">{{ tool }}</div>
+                            <div class="tool-desc">{{ desc }}</div>
+                        </div>
+                        <button class="use-tool-btn" onclick="selectTool('{{ tool }}')">Use</button>
+                    </div>
+                    {% endfor %}
+                </div>
+                
+                <h6 class="mt-3"><i class="fas fa-database"></i> Data Files</h6>
+                <div class="file-list">
+                    {% for file in data_files %}
+                    <div class="file-item" onclick="selectFile('{{ file }}')">{{ file }}</div>
+                    {% endfor %}
+                </div>
+                
+                <h6 class="mt-3"><i class="fas fa-cloud"></i> Resources</h6>
+                <div>
+                    {% for resource, desc in resources.items() %}
+                    <div class="tool-item">
+                        <div>
+                            <div class="tool-name">{{ resource }}</div>
+                            <div class="tool-desc">{{ desc }}</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
             <div class="input-group">
+                <button class="gear-button" onclick="toggleToolsPanel()">
+                    <i class="fas fa-cog"></i>
+                </button>
                 <input 
                     type="text" 
                     class="form-control chat-input" 
@@ -280,6 +391,60 @@
             div.textContent = text;
             return div.innerHTML;
         }
+
+        function toggleToolsPanel() {
+            const panel = document.getElementById('toolsPanel');
+            panel.style.display = panel.style.display === 'none' || !panel.style.display ? 'block' : 'none';
+        }
+        
+        function selectTool(toolName) {
+            const input = document.getElementById('messageInput');
+            let message = '';
+            
+            if (toolName === 'read_csv') {
+                message = 'read ';
+            } else if (toolName === 'get_data_stats') {
+                message = 'analyze ';
+            } else if (toolName === 'generate_chart') {
+                message = 'create a chart from ';
+            } else if (toolName === 'get_column_info') {
+                message = 'show column info for ';
+            } else if (toolName === 'filter_data') {
+                message = 'filter data in ';
+            } else if (toolName === 'list_data_files') {
+                message = 'list files';
+            } else {
+                message = toolName + ' ';
+            }
+            
+            input.value = message;
+            input.focus();
+            toggleToolsPanel();
+        }
+        
+        function selectFile(fileName) {
+            const input = document.getElementById('messageInput');
+            const currentValue = input.value.trim();
+            
+            if (currentValue && !currentValue.includes('.csv')) {
+                input.value = currentValue + fileName;
+            } else {
+                input.value = 'read ' + fileName;
+            }
+            
+            input.focus();
+            toggleToolsPanel();
+        }
+        
+        // Close tools panel when clicking outside
+        document.addEventListener('click', function(event) {
+            const panel = document.getElementById('toolsPanel');
+            const gearButton = document.querySelector('.gear-button');
+            
+            if (!panel.contains(event.target) && !gearButton.contains(event.target)) {
+                panel.style.display = 'none';
+            }
+        });
 
         // Focus on input when page loads
         document.addEventListener('DOMContentLoaded', function() {
