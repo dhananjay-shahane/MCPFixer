@@ -54,62 +54,280 @@ class MCPClient:
             if not self.connect_to_server():
                 raise RuntimeError("Cannot connect to MCP server")
         
-        # Import the server module and get functions directly
+        # Import the actual tool functions directly from the server module
         try:
-            import server.server as server
+            import server.server as server_module
             
-            # Access the underlying functions from FastMCP wrapped functions
-            def get_actual_function(wrapped_func):
-                if hasattr(wrapped_func, 'func'):
-                    return wrapped_func.func
-                elif hasattr(wrapped_func, 'function'):
-                    return wrapped_func.function
-                elif hasattr(wrapped_func, '__wrapped__'):
-                    return wrapped_func.__wrapped__
-                elif callable(wrapped_func):
-                    return wrapped_func
-                else:
-                    return None
+            # Create a direct mapping to the actual Python functions
+            # These are the original functions before FastMCP wrapping
+            def read_csv_direct(filename: str):
+                import pandas as pd
+                import os
+                try:
+                    filepath = f"data/{filename}"
+                    if os.path.exists(filepath):
+                        df = pd.read_csv(filepath)
+                        return df.to_string(index=False)
+                    else:
+                        return f"File {filename} not found in data directory"
+                except Exception as e:
+                    return f"Error reading CSV file: {str(e)}"
             
-            # Map tool names to actual functions
-            tool_functions = {
-                "read_csv": get_actual_function(server.read_csv),
-                "generate_chart": get_actual_function(server.generate_chart),
-                "get_data_stats": get_actual_function(server.get_data_stats),
-                "filter_data": get_actual_function(server.filter_data),
-                "get_column_info": get_actual_function(server.get_column_info),
-                "list_data_files": get_actual_function(server.list_data_files),
-                "execute_script": get_actual_function(server.execute_script)
+            def list_data_files_direct():
+                import os
+                import json
+                try:
+                    data_dir = "data"
+                    if not os.path.exists(data_dir):
+                        return json.dumps({"available_files": []}, indent=2)
+                    
+                    csv_files = [f for f in os.listdir(data_dir) if f.endswith('.csv')]
+                    return json.dumps({"available_files": csv_files}, indent=2)
+                    
+                except Exception as e:
+                    return f"Error listing files: {str(e)}"
+            
+            def get_data_stats_direct(data_source: str):
+                import pandas as pd
+                import numpy as np
+                import os
+                import json
+                try:
+                    filepath = f'data/{data_source}'
+                    if not os.path.exists(filepath):
+                        return f"Data file {data_source} not found in data directory"
+                        
+                    df = pd.read_csv(filepath)
+                    
+                    stats = {
+                        "file_info": {
+                            "filename": data_source,
+                            "shape": df.shape,
+                            "size_mb": round(os.path.getsize(filepath) / (1024*1024), 4)
+                        },
+                        "columns": list(df.columns),
+                        "data_types": df.dtypes.astype(str).to_dict(),
+                        "null_counts": df.isnull().sum().to_dict(),
+                        "null_percentages": (df.isnull().sum() / len(df) * 100).round(2).to_dict(),
+                    }
+                    
+                    # Add descriptive statistics for numeric columns
+                    numeric_cols = df.select_dtypes(include=[np.number]).columns
+                    if len(numeric_cols) > 0:
+                        stats["numeric_statistics"] = df[numeric_cols].describe().to_dict()
+                    
+                    # Add value counts for categorical columns
+                    categorical_cols = df.select_dtypes(include=['object']).columns
+                    categorical_stats = {}
+                    for col in categorical_cols:
+                        if df[col].nunique() <= 20:
+                            categorical_stats[col] = df[col].value_counts().to_dict()
+                    
+                    if categorical_stats:
+                        stats["categorical_statistics"] = categorical_stats
+                    
+                    return json.dumps(stats, indent=2, default=str)
+                    
+                except Exception as e:
+                    return f"Error getting stats: {str(e)}"
+            
+            def generate_chart_direct(data_source: str, chart_type: str = 'bar', title: str = 'Chart', x_axis: str = 'x', y_axis: str = 'y'):
+                import pandas as pd
+                import matplotlib.pyplot as plt
+                from datetime import datetime
+                import os
+                try:
+                    filepath = f'data/{data_source}'
+                    if not os.path.exists(filepath):
+                        return f"Data file {data_source} not found in data directory"
+                        
+                    df = pd.read_csv(filepath)
+                    
+                    if x_axis not in df.columns:
+                        return f"Column '{x_axis}' not found in data. Available columns: {list(df.columns)}"
+                    
+                    if y_axis not in df.columns and chart_type != 'pie':
+                        return f"Column '{y_axis}' not found in data. Available columns: {list(df.columns)}"
+                    
+                    plt.figure(figsize=(12, 8))
+                    
+                    if chart_type == 'bar':
+                        plt.bar(df[x_axis], df[y_axis])
+                        plt.xlabel(x_axis)
+                        plt.ylabel(y_axis)
+                    elif chart_type == 'line':
+                        plt.plot(df[x_axis], df[y_axis], marker='o')
+                        plt.xlabel(x_axis)
+                        plt.ylabel(y_axis)
+                    elif chart_type == 'scatter':
+                        plt.scatter(df[x_axis], df[y_axis])
+                        plt.xlabel(x_axis)
+                        plt.ylabel(y_axis)
+                    elif chart_type == 'pie':
+                        grouped_data = df.groupby(x_axis)[y_axis].sum() if y_axis in df.columns else df[x_axis].value_counts()
+                        plt.pie(grouped_data.values, labels=grouped_data.index, autopct='%1.1f%%')
+                    else:
+                        return f"Unsupported chart type: {chart_type}. Supported types: bar, line, scatter, pie"
+                    
+                    plt.title(title)
+                    plt.xticks(rotation=45)
+                    plt.tight_layout()
+                    
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"output/chart_{chart_type}_{timestamp}.png"
+                    plt.savefig(filename, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    
+                    return f"Chart saved as {filename}"
+                    
+                except Exception as e:
+                    return f"Error generating chart: {str(e)}"
+            
+            def get_column_info_direct(data_source: str, column: str = None):
+                import pandas as pd
+                import json
+                import os
+                try:
+                    filepath = f'data/{data_source}'
+                    if not os.path.exists(filepath):
+                        return f"Data file {data_source} not found in data directory"
+                        
+                    df = pd.read_csv(filepath)
+                    
+                    if column and column not in df.columns:
+                        return f"Column '{column}' not found in data. Available columns: {list(df.columns)}"
+                    
+                    columns_to_analyze = [column] if column else df.columns
+                    column_info = {}
+                    
+                    for col in columns_to_analyze:
+                        info = {
+                            "data_type": str(df[col].dtype),
+                            "null_count": int(df[col].isnull().sum()),
+                            "null_percentage": round(df[col].isnull().sum() / len(df) * 100, 2),
+                            "unique_values": int(df[col].nunique()),
+                            "memory_usage": int(df[col].memory_usage(deep=True))
+                        }
+                        
+                        if pd.api.types.is_numeric_dtype(df[col]):
+                            info.update({
+                                "min": float(df[col].min()) if not df[col].isnull().all() else None,
+                                "max": float(df[col].max()) if not df[col].isnull().all() else None,
+                                "mean": float(df[col].mean()) if not df[col].isnull().all() else None,
+                                "median": float(df[col].median()) if not df[col].isnull().all() else None,
+                                "std": float(df[col].std()) if not df[col].isnull().all() else None
+                            })
+                        else:
+                            if df[col].nunique() <= 10:
+                                info["top_values"] = df[col].value_counts().head(10).to_dict()
+                            else:
+                                info["sample_values"] = df[col].dropna().head(5).tolist()
+                        
+                        column_info[col] = info
+                    
+                    return json.dumps(column_info, indent=2, default=str)
+                    
+                except Exception as e:
+                    return f"Error getting column info: {str(e)}"
+            
+            def filter_data_direct(data_source: str, column: str, value: str, operation: str = "equals"):
+                import pandas as pd
+                import json
+                import os
+                try:
+                    filepath = f'data/{data_source}'
+                    if not os.path.exists(filepath):
+                        return f"Data file {data_source} not found in data directory"
+                        
+                    df = pd.read_csv(filepath)
+                    
+                    if column not in df.columns:
+                        return f"Column '{column}' not found in data. Available columns: {list(df.columns)}"
+                    
+                    # Apply filtering based on operation
+                    if operation == "equals":
+                        filtered = df[df[column] == value]
+                    elif operation == "contains":
+                        filtered = df[df[column].astype(str).str.contains(str(value), case=False, na=False)]
+                    elif operation == "greater":
+                        try:
+                            filtered = df[pd.to_numeric(df[column], errors='coerce') > float(value)]
+                        except ValueError:
+                            return f"Cannot perform 'greater' operation on non-numeric data in column '{column}'"
+                    elif operation == "less":
+                        try:
+                            filtered = df[pd.to_numeric(df[column], errors='coerce') < float(value)]
+                        except ValueError:
+                            return f"Cannot perform 'less' operation on non-numeric data in column '{column}'"
+                    elif operation == "not_equals":
+                        filtered = df[df[column] != value]
+                    else:
+                        return f"Unsupported operation: {operation}. Supported: equals, contains, greater, less, not_equals"
+                    
+                    if len(filtered) == 0:
+                        return f"No rows found matching the filter criteria"
+                    
+                    result = {
+                        "filtered_count": len(filtered),
+                        "total_count": len(df),
+                        "percentage": round(len(filtered) / len(df) * 100, 2),
+                        "data": filtered.head(100).to_string(index=False)
+                    }
+                    
+                    return json.dumps(result, indent=2)
+                    
+                except Exception as e:
+                    return f"Error filtering data: {str(e)}"
+            
+            def execute_script_direct(script_name: str, csv_file: str, args: str = ""):
+                import subprocess
+                import sys
+                import os
+                try:
+                    script_path = f"scripts/{script_name}"
+                    if not os.path.exists(script_path):
+                        available_scripts = [f for f in os.listdir("scripts") if f.endswith('.py')]
+                        return f"Script {script_name} not found. Available scripts: {available_scripts}"
+                    
+                    csv_path = f"data/{csv_file}"
+                    if not os.path.exists(csv_path):
+                        return f"CSV file {csv_file} not found in data directory"
+                    
+                    # Build command
+                    cmd = [sys.executable, script_path, csv_path]
+                    if args:
+                        cmd.extend(args.split())
+                    
+                    # Execute script
+                    result = subprocess.run(cmd, capture_output=True, text=True, cwd=".")
+                    
+                    if result.returncode == 0:
+                        return f"Script executed successfully:\n{result.stdout}"
+                    else:
+                        return f"Script execution failed:\n{result.stderr}"
+                        
+                except Exception as e:
+                    return f"Error executing script: {str(e)}"
+            
+            # Direct function mapping
+            direct_functions = {
+                "read_csv": read_csv_direct,
+                "list_data_files": list_data_files_direct,
+                "get_data_stats": get_data_stats_direct,
+                "generate_chart": generate_chart_direct,
+                "get_column_info": get_column_info_direct,
+                "filter_data": filter_data_direct,
+                "execute_script": execute_script_direct
             }
             
-            if tool_name in tool_functions and tool_functions[tool_name]:
-                return tool_functions[tool_name](**tool_args)
+            if tool_name in direct_functions:
+                return direct_functions[tool_name](**tool_args)
             else:
-                # Fallback: try calling the wrapped function directly
-                wrapped_functions = {
-                    "read_csv": server.read_csv,
-                    "generate_chart": server.generate_chart,
-                    "get_data_stats": server.get_data_stats,
-                    "filter_data": server.filter_data,
-                    "get_column_info": server.get_column_info,
-                    "list_data_files": server.list_data_files,
-                    "execute_script": server.execute_script
-                }
-                
-                if tool_name in wrapped_functions:
-                    # Try to call the tool through FastMCP's call interface
-                    wrapped_func = wrapped_functions[tool_name]
-                    if hasattr(wrapped_func, '__call__'):
-                        try:
-                            return wrapped_func(**tool_args)
-                        except Exception as call_error:
-                            raise RuntimeError(f"Error calling wrapped function {tool_name}: {call_error}")
-                    
-                available_tools = list(tool_functions.keys())
+                available_tools = list(direct_functions.keys())
                 raise RuntimeError(f"Tool {tool_name} not found. Available tools: {available_tools}")
                 
         except ImportError as e:
-            raise RuntimeError(f"Cannot import server module: {e}")
+            raise RuntimeError(f"Cannot import required modules: {e}")
         except Exception as e:
             raise RuntimeError(f"Error calling tool {tool_name}: {e}")
     
