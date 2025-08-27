@@ -18,112 +18,191 @@ sys.path.insert(0, str(current_dir))
 app = Flask(__name__)
 
 def simple_query_parser(query, direct_client):
-    """Simple keyword-based query parser when Ollama is not available"""
+    """Enhanced keyword-based query parser when Ollama is not available"""
     query_lower = query.lower()
     
     # Get available data files
     data_files = direct_client.list_data_files()
     default_file = data_files[0] if data_files else None
     
-    # Keyword mappings for tools
-    if any(word in query_lower for word in ['stats', 'statistics', 'summary', 'analyze', 'analysis', 'info', 'describe']):
-        if default_file:
+    # Try to extract specific filename from query
+    detected_file = None
+    for file in data_files:
+        if file.lower() in query_lower or file.split('.')[0].lower() in query_lower:
+            detected_file = file
+            break
+    
+    # Use detected file or default
+    target_file = detected_file or default_file
+    
+    # Enhanced pattern matching for different types of queries
+    
+    # Statistics and analysis queries
+    if any(word in query_lower for word in ['stats', 'statistics', 'summary', 'analyze', 'analysis', 'info', 'describe', 'overview']):
+        if target_file:
             return {
                 "tool": "get_data_stats",
-                "parameters": {"data_source": default_file},
-                "explanation": f"Getting comprehensive statistics for {default_file}"
+                "parameters": {"data_source": target_file},
+                "explanation": f"📊 Analyzing {target_file} and generating comprehensive statistics including data types, missing values, and summary statistics."
             }
         else:
             return {
                 "tool": None,
                 "parameters": {},
-                "explanation": "I'd love to analyze your data, but no CSV files are available. Please upload a CSV file first."
+                "explanation": "📁 I'd love to analyze your data! Please upload a CSV file first, then ask me to analyze it."
             }
     
-    elif any(word in query_lower for word in ['chart', 'graph', 'plot', 'visualize', 'visualization']):
-        if default_file:
-            # Try to detect chart type
+    # Chart and visualization queries
+    elif any(word in query_lower for word in ['chart', 'graph', 'plot', 'visualize', 'visualization', 'draw']):
+        if target_file:
+            # Smart chart type detection
             chart_type = "bar"
-            if "line" in query_lower:
+            if any(word in query_lower for word in ['line', 'trend', 'time', 'over time']):
                 chart_type = "line"
-            elif "scatter" in query_lower:
+            elif any(word in query_lower for word in ['scatter', 'correlation', 'relationship']):
                 chart_type = "scatter"
-            elif "pie" in query_lower:
+            elif any(word in query_lower for word in ['pie', 'distribution', 'proportion']):
                 chart_type = "pie"
+            
+            # Try to detect column names from query
+            # Get column info first to make better assumptions
+            try:
+                column_result = direct_client.execute_tool("get_column_info", {"data_source": target_file})
+                # This is a simplified approach - in reality you'd parse the JSON response
+                x_axis = "index"  # Safe default
+                y_axis = "value"  # Safe default
+            except:
+                x_axis = "index"
+                y_axis = "value"
             
             return {
                 "tool": "generate_chart",
                 "parameters": {
-                    "data_source": default_file,
+                    "data_source": target_file,
                     "chart_type": chart_type,
-                    "title": f"{chart_type.title()} Chart",
-                    "x_axis": "name",  # Default assumption
-                    "y_axis": "value"  # Default assumption
+                    "title": f"{target_file.split('.')[0]} - {chart_type.title()} Chart",
+                    "x_axis": x_axis,
+                    "y_axis": y_axis
                 },
-                "explanation": f"Creating a {chart_type} chart from {default_file}"
+                "explanation": f"📈 Creating a {chart_type} chart from {target_file}. I'll use the most suitable columns for visualization."
             }
         else:
             return {
                 "tool": None,
                 "parameters": {},
-                "explanation": "I'd love to create a chart, but no CSV files are available. Please upload a CSV file first."
+                "explanation": "📊 I'd love to create a chart for you! Please upload a CSV file first."
             }
     
-    elif any(word in query_lower for word in ['read', 'show', 'display', 'content', 'data']):
-        if default_file:
+    # Data reading and display queries
+    elif any(word in query_lower for word in ['read', 'show', 'display', 'content', 'view', 'see', 'preview']):
+        if target_file:
             return {
                 "tool": "read_csv",
-                "parameters": {"filename": default_file},
-                "explanation": f"Reading and displaying the contents of {default_file}"
+                "parameters": {"filename": target_file},
+                "explanation": f"📋 Reading and displaying the contents of {target_file}."
             }
         else:
             return {
                 "tool": None,
                 "parameters": {},
-                "explanation": "I'd love to show your data, but no CSV files are available. Please upload a CSV file first."
+                "explanation": "📄 I'd love to show your data! Please upload a CSV file first."
             }
     
-    elif any(word in query_lower for word in ['filter', 'search', 'find', 'where']):
-        if default_file:
-            return {
-                "tool": None,
-                "parameters": {},
-                "explanation": "I can help filter your data! Please specify what column and value you want to filter by. For example: 'filter data where age > 25'"
-            }
-        else:
-            return {
-                "tool": None,
-                "parameters": {},
-                "explanation": "I'd love to filter your data, but no CSV files are available. Please upload a CSV file first."
-            }
-    
-    elif any(word in query_lower for word in ['column', 'columns', 'field', 'fields']):
-        if default_file:
+    # Column information queries
+    elif any(word in query_lower for word in ['column', 'columns', 'field', 'fields', 'structure', 'schema']):
+        if target_file:
             return {
                 "tool": "get_column_info",
-                "parameters": {"data_source": default_file},
-                "explanation": f"Getting detailed information about columns in {default_file}"
+                "parameters": {"data_source": target_file},
+                "explanation": f"🏗️ Getting detailed information about the structure and columns in {target_file}."
             }
         else:
             return {
                 "tool": None,
                 "parameters": {},
-                "explanation": "I'd love to show column information, but no CSV files are available. Please upload a CSV file first."
+                "explanation": "🗂️ I'd love to show column information! Please upload a CSV file first."
             }
     
-    else:
-        # Generic help response
+    # Filter queries (enhanced parsing)
+    elif any(word in query_lower for word in ['filter', 'search', 'find', 'where', 'select']):
+        if target_file:
+            # Try to extract filter conditions
+            # Look for patterns like "where X > Y" or "X equals Y"
+            filter_patterns = [
+                (r'where\s+(\w+)\s*([><=!]+)\s*(\w+)', 'where clause'),
+                (r'(\w+)\s*(equals?|is|=)\s*(\w+)', 'equals condition'),
+                (r'(\w+)\s*>\s*(\w+)', 'greater than'),
+                (r'(\w+)\s*<\s*(\w+)', 'less than')
+            ]
+            
+            for pattern, description in filter_patterns:
+                match = re.search(pattern, query_lower)
+                if match:
+                    column = match.group(1)
+                    if len(match.groups()) >= 3:
+                        value = match.group(3)
+                        operator = match.group(2) if len(match.groups()) >= 3 else 'equals'
+                        
+                        operation = 'equals'
+                        if '>' in operator:
+                            operation = 'greater'
+                        elif '<' in operator:
+                            operation = 'less'
+                        elif '!' in operator or 'not' in operator:
+                            operation = 'not_equals'
+                        
+                        return {
+                            "tool": "filter_data",
+                            "parameters": {
+                                "data_source": target_file,
+                                "column": column,
+                                "value": value,
+                                "operation": operation
+                            },
+                            "explanation": f"🔍 Filtering {target_file} where {column} {operation} {value}."
+                        }
+            
+            # If no specific pattern found, ask for clarification
+            return {
+                "tool": None,
+                "parameters": {},
+                "explanation": f"🔍 I can filter {target_file} for you! Please specify the condition more clearly, like: 'show rows where age > 25' or 'filter by department equals Engineering'."
+            }
+        else:
+            return {
+                "tool": None,
+                "parameters": {},
+                "explanation": "🔍 I'd love to filter data for you! Please upload a CSV file first."
+            }
+    
+    # Help and greeting queries
+    elif any(word in query_lower for word in ['help', 'hello', 'hi', 'what', 'how', 'can you']):
         if data_files:
             return {
                 "tool": None,
                 "parameters": {},
-                "explanation": f"I can help you analyze your data! Available files: {', '.join(data_files)}. Try asking me to 'analyze data', 'create a chart', 'show columns', or 'read data'."
+                "explanation": f"👋 Hi! I'm your AI data analysis assistant. I can help you with:\n\n📊 **Analysis**: 'analyze {data_files[0]}'\n📈 **Charts**: 'create a bar chart'\n📋 **View data**: 'show me the data'\n🏗️ **Structure**: 'show columns'\n🔍 **Filter**: 'filter where age > 25'\n\nAvailable files: {', '.join(data_files)}\n\nWhat would you like to explore?"
             }
         else:
             return {
                 "tool": None,
                 "parameters": {},
-                "explanation": "Hi! I'm your data analysis assistant. I can help analyze CSV files, create charts, and provide statistics. Please upload a CSV file to get started, then ask me questions like 'analyze my data' or 'create a chart'."
+                "explanation": "👋 Hello! I'm your AI data analysis assistant. I can help you analyze CSV files, create charts, and explore your data.\n\n🚀 **Get started**: Upload a CSV file, then ask me questions like:\n• 'analyze my data'\n• 'create a chart'\n• 'show me the columns'\n\nWhat data would you like to explore today?"
+            }
+    
+    # Default response for unclear queries
+    else:
+        if data_files:
+            return {
+                "tool": None,
+                "parameters": {},
+                "explanation": f"🤔 I'm not sure exactly what you want to do, but I can help you with your data! Available files: {', '.join(data_files)}\n\nTry asking:\n• 'analyze data' - for statistics\n• 'create chart' - for visualizations\n• 'show data' - to view contents\n• 'show columns' - for structure info"
+            }
+        else:
+            return {
+                "tool": None,
+                "parameters": {},
+                "explanation": "🤖 I'm your data analysis assistant! Upload a CSV file to get started, then I can help you analyze it, create charts, and explore your data.\n\nOnce you upload a file, try asking:\n• 'analyze my data'\n• 'create a bar chart'\n• 'show me the data'"
             }
 
 # Ensure required directories exist
