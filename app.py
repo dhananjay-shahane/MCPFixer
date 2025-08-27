@@ -38,8 +38,13 @@ def index():
         tools = client.list_tools()
         resources = client.list_resources() if hasattr(client, 'list_resources') else {}
         
+        print(f"DEBUG: data_files = {data_files}")
+        print(f"DEBUG: tools = {tools}")
+        print(f"DEBUG: resources = {resources}")
+        
         return render_template('chat.html', data_files=data_files, tools=tools, resources=resources)
     except Exception as e:
+        print(f"ERROR loading chat interface: {str(e)}")
         return f"Error loading chat interface: {str(e)}", 500
 
 @app.route('/api/chat', methods=['POST'])
