@@ -24,7 +24,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pip install fastmcp pandas matplotlib numpy requests flask psutil && python app.py"
+args = "OLLAMA_URL=http://127.0.0.1:11434 pip install fastmcp pandas matplotlib numpy requests flask psutil && python app.py"
 waitForPort = 5000
 
 [workflows.workflow.metadata]

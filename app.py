@@ -54,8 +54,8 @@ def chat():
         # Initialize clients
         direct_client = DirectClient()
         
-        # Get Ollama URL from environment or use default
-        ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
+        # Use the specific Ollama configuration provided by user
+        ollama_url = 'http://127.0.0.1:11434'
         ollama_client = OllamaClient(model="llama3.2:1b", base_url=ollama_url)
         
         # Process query with Ollama
