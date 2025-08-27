@@ -1,6 +1,7 @@
 import requests
 import json
 import time
+import os
 from typing import Optional, Dict, Any
 
 class OllamaClient:
@@ -8,7 +9,8 @@ class OllamaClient:
     
     def __init__(self, model="llama3.2", base_url="http://localhost:11434", max_retries=3):
         self.model = model
-        self.base_url = base_url
+        # Check for external Ollama URL in environment
+        self.base_url = os.getenv("OLLAMA_URL", base_url)
         self.max_retries = max_retries
         self.system_prompt = """You are a helpful AI assistant that helps users analyze data using specialized tools.
 
