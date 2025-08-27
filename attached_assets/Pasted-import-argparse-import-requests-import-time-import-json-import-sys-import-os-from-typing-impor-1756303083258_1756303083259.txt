@@ -1,0 +1,214 @@
+import argparse
+import requests
+import time
+import json
+import sys
+import os
+from typing import Optional, Dict, Any
+
+# Add the parent directory to the path to import from other modules
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+def check_ollama(port=11434):
+    """Check if Ollama is running on the specified port"""
+    try:
+        # Try to connect to Ollama
+        response = requests.get(f"http://localhost:{port}/api/tags", timeout=5)
+        if response.status_code == 200:
+            models = response.json()
+            # Check if any model is available
+            if models.get('models'):
+                return True, port
+            else:
+                print("Warning: No models found. Please pull a model with: ollama pull llama3.2")
+                return False, port
+        else:
+            print(f"Ollama responded with status code: {response.status_code}")
+            return False, port
+    except requests.ConnectionError:
+        # Try alternative ports
+        for alt_port in [11435, 11436, 11437]:
+            try:
+                response = requests.get(f"http://localhost:{alt_port}/api/tags", timeout=3)
+                if response.status_code == 200:
+                    print(f"Found Ollama running on port {alt_port}")
+                    return True, alt_port
+            except:
+                continue
+        print("Error: Could not connect to Ollama. Please make sure it's running.")
+        print("You can start it with: ollama serve")
+        return False, port
+    except Exception as e:
+        print(f"Error checking Ollama: {str(e)}")
+        return False, port
+
+def is_ollama_process_running():
+    """Check if Ollama process is already running"""
+    try:
+        if os.name == 'nt':  # Windows
+            import subprocess
+            result = subprocess.run(['tasklist', '/fi', 'imagename eq ollama.exe'], 
+                                  capture_output=True, text=True)
+            return "ollama.exe" in result.stdout
+        else:  # Unix-like systems
+            import psutil
+            for proc in psutil.process_iter(['name']):
+                if 'ollama' in proc.info['name'].lower():
+                    return True
+            return False
+    except:
+        return False
+
+def run_ollama_query(query: str, port: int = 11434) -> Optional[Dict[str, Any]]:
+    """Run a query through Ollama and return the response"""
+    try:
+        print("AI: Thinking...", end="", flush=True)
+        
+        # Show loading animation
+        animation = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]
+        idx = 0
+        
+        # Start the request with a shorter timeout
+        response = requests.post(
+            f"http://localhost:{port}/api/chat",
+            json={
+                "model": "llama3.2",
+                "messages": [
+                    {"role": "system", "content": "You are a helpful AI assistant that helps users work with data tools."},
+                    {"role": "user", "content": query}
+                ],
+                "stream": False
+            },
+            timeout=15  # Reduced timeout from 30 to 15 seconds
+        )
+        
+        # Clear the animation line
+        print("\r" + " " * 50 + "\r", end="", flush=True)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"Ollama API error: {response.status_code}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        print("\rAI: Request timed out. The model might be too large for your system.")
+        print("Try using a smaller model: ollama pull llama3.2:1b")
+        return None
+    except Exception as e:
+        print(f"\rError running query: {str(e)}")
+        return None
+
+def run_direct_tool(tool_name: str, params: Dict[str, Any]):
+    """Execute a tool directly without Ollama"""
+    try:
+        # Import and run the direct client
+        from client.direct_client import DirectClient
+        client = DirectClient()
+        result = client.execute_tool(tool_name, params)
+        return result
+    except ImportError as e:
+        return f"Direct client not available: {e}"
+    except Exception as e:
+        return f"Error executing tool: {str(e)}"
+
+def run_cli():
+    parser = argparse.ArgumentParser(description="MCP Client CLI with Ollama Integration")
+    parser.add_argument('--query', help='Natural language query')
+    parser.add_argument('--tool', help='Direct tool execution (bypass LLM)')
+    parser.add_argument('--params', help='Tool parameters as JSON string')
+    parser.add_argument('--model', help='Ollama model to use', default='llama3.2:1b')
+    
+    args = parser.parse_args()
+    
+    # Check if Ollama is running
+    ollama_running, port = check_ollama()
+    
+    if not ollama_running:
+        # Check if Ollama process is already running but not responding
+        if is_ollama_process_running():
+            print("Ollama process is running but not responding. It might be stuck.")
+            restart = input("Would you like to try restarting Ollama? (y/n): ")
+            if restart.lower() == 'y':
+                try:
+                    if os.name == 'nt':  # Windows
+                        import subprocess
+                        subprocess.run(['taskkill', '/f', '/im', 'ollama.exe'], 
+                                      capture_output=True)
+                    # Wait for process to terminate
+                    time.sleep(2)
+                except:
+                    pass
+            else:
+                return
+        
+        # Ask if user wants to start Ollama
+        start = input("Would you like to try starting Ollama now? (y/n): ")
+        if start.lower() == 'y':
+            try:
+                import subprocess
+                # Start Ollama in the background
+                subprocess.Popen(["ollama", "serve"], 
+                                stdout=subprocess.DEVNULL, 
+                                stderr=subprocess.DEVNULL)
+                print("Starting Ollama... Please wait a few seconds.")
+                
+                # Wait and check if Ollama started successfully
+                for _ in range(10):
+                    time.sleep(1)
+                    ollama_running, port = check_ollama()
+                    if ollama_running:
+                        print("Ollama started successfully!")
+                        break
+                else:
+                    print("Ollama still not responding. Please start it manually.")
+                    return
+            except Exception as e:
+                print(f"Failed to start Ollama: {str(e)}")
+                return
+        else:
+            return
+    
+    # If we have a query, process it with Ollama
+    if args.query:
+        response = run_ollama_query(args.query, port)
+        if response:
+            # Extract the message content from the response
+            message_content = response.get('message', {}).get('content', 'No response generated')
+            print(f"AI: {message_content}")
+        return
+    
+    # If we have a direct tool execution
+    if args.tool:
+        params = json.loads(args.params) if args.params else {}
+        result = run_direct_tool(args.tool, params)
+        print(f"Tool result: {result}")
+        return
+    
+    # Start interactive mode
+    try:
+        from client.ollama_client import main
+        main(port, args.model)
+    except ImportError as e:
+        print(f"Interactive client not available: {e}")
+        print("Falling back to simple query mode...")
+        
+        while True:
+            try:
+                query = input("\nUser: ")
+                if query.lower() in ['quit', 'exit', 'q']:
+                    break
+                
+                response = run_ollama_query(query, port)
+                if response:
+                    # Extract the message content from the response
+                    message_content = response.get('message', {}).get('content', 'No response generated')
+                    print(f"AI: {message_content}")
+            except KeyboardInterrupt:
+                print("\nExiting...")
+                break
+            except Exception as e:
+                print(f"Error: {str(e)}")
+
+if __name__ == "__main__":
+    run_cli()

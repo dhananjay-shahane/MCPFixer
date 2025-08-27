@@ -1,0 +1,142 @@
+import requests
+import json
+import time
+from typing import Optional, Dict, Any
+
+class OllamaClient:
+    def __init__(self, model="llama3.2:1b", base_url="http://localhost:11434", max_retries=3):
+        self.model = model
+        self.base_url = base_url
+        self.max_retries = max_retries
+        self.system_prompt = """You are a helpful AI assistant that interacts with data tools.
+        You have access to these tools:
+        1. generate_chart - Creates charts from CSV data (parameters: data_source, chart_type, title, x_axis, y_axis)
+        2. get_data_stats - Gets statistics about CSV data (parameters: data_source)
+        3. filter_data - Filters CSV data by column value (parameters: data_source, column, value)
+        4. read_csv - Reads CSV file content (parameters: filename)
+        
+        Always respond with a JSON object containing:
+        {
+            "tool": "tool_name",
+            "parameters": {param1: value1, param2: value2, ...},
+            "explanation": "Brief explanation of why you chose this tool"
+        }
+        
+        If the user query doesn't match any tool, respond with:
+        {
+            "tool": null,
+            "parameters": {},
+            "explanation": "I couldn't find a suitable tool for this request"
+        }
+        """
+
+    def process_query(self, query):
+        """Process natural language query using Ollama with retries"""
+        for attempt in range(self.max_retries):
+            try:
+                # Show loading message
+                print("AI: Thinking...", end="", flush=True)
+                
+                # Make the request with shorter timeout
+                response = requests.post(
+                    f"{self.base_url}/api/chat",
+                    json={
+                        "model": self.model,
+                        "messages": [
+                            {"role": "system", "content": self.system_prompt},
+                            {"role": "user", "content": query}
+                        ],
+                        "stream": False
+                    },
+                    timeout=15  # Reduced timeout
+                )
+                
+                # Clear the loading message
+                print("\r" + " " * 50 + "\r", end="", flush=True)
+                
+                if response.status_code == 200:
+                    content = response.json().get('message', {}).get('content', '')
+                    
+                    # Extract JSON from response
+                    try:
+                        # Try to parse the content as JSON
+                        return json.loads(content)
+                    except json.JSONDecodeError:
+                        # If it's not valid JSON, return it as a regular response
+                        return {
+                            "tool": None,
+                            "parameters": {},
+                            "explanation": content
+                        }
+                else:
+                    return {
+                        "tool": None,
+                        "parameters": {},
+                        "explanation": f"Ollama API error: {response.status_code}"
+                    }
+                    
+            except requests.exceptions.Timeout:
+                if attempt < self.max_retries - 1:
+                    print(f"\rAttempt {attempt + 1} timed out, retrying...")
+                    time.sleep(1)
+                else:
+                    return {
+                        "tool": None,
+                        "parameters": {},
+                        "explanation": "Request timed out. The model might be too large for your system. Try using a smaller model."
+                    }
+            except Exception as e:
+                if attempt < self.max_retries - 1:
+                    print(f"\rAttempt {attempt + 1} failed, retrying...")
+                    time.sleep(1)
+                else:
+                    return {
+                        "tool": None,
+                        "parameters": {},
+                        "explanation": f"Error processing query after {self.max_retries} attempts: {str(e)}"
+                    }
+
+def main(port=11434, model="llama3.2:1b"):
+    # Initialize client
+    ollama_client = OllamaClient(base_url=f"http://localhost:{port}", model=model)
+    
+    print("AI: Hello! I'm your assistant. How can I help you today?")
+    print(f"AI: Using model: {model}")
+    
+    # Interactive loop
+    while True:
+        try:
+            user_input = input("\nUser: ")
+            if user_input.lower() in ['quit', 'exit', 'q']:
+                print("AI: Goodbye!")
+                break
+            
+            # Process query with Ollama
+            response = ollama_client.process_query(user_input)
+            
+            if response and "tool" in response:
+                if response["tool"]:
+                    print(f"AI: Selected tool: {response['tool']}")
+                    print(f"AI: Explanation: {response['explanation']}")
+                    
+                    # Execute the tool using direct client
+                    try:
+                        from client.direct_client import DirectClient
+                        direct_client = DirectClient()
+                        result = direct_client.execute_tool(response["tool"], response["parameters"])
+                        print(f"AI: Tool result: {result}")
+                    except Exception as e:
+                        print(f"AI: Error executing tool: {str(e)}")
+                else:
+                    print(f"AI: {response['explanation']}")
+            else:
+                print("AI: Sorry, I couldn't process your request.")
+                    
+        except KeyboardInterrupt:
+            print("\nAI: Goodbye!")
+            break
+        except Exception as e:
+            print(f"Error: {str(e)}")
+
+if __name__ == "__main__":
+    main()

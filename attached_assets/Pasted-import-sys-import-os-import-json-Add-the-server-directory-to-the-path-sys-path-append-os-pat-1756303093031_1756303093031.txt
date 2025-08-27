@@ -1,0 +1,68 @@
+import sys
+import os
+import json
+
+# Add the server directory to the path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+# Import the actual functions from the server
+from server.server import generate_chart, get_data_stats, filter_data, read_csv
+
+class DirectClient:
+    def __init__(self):
+        self.available_tools = {
+            "generate_chart": generate_chart,
+            "get_data_stats": get_data_stats,
+            "filter_data": filter_data,
+            "read_csv": read_csv
+        }
+    
+    def execute_tool(self, tool_name, params):
+        """Execute a tool directly"""
+        if tool_name in self.available_tools:
+            try:
+                # Call the function with the provided parameters
+                return self.available_tools[tool_name](**params)
+            except Exception as e:
+                return f"Error executing tool: {str(e)}"
+        else:
+            return f"Unknown tool: {tool_name}"
+
+def main():
+    client = DirectClient()
+    
+    print("Available tools: generate_chart, get_data_stats, filter_data, read_csv")
+    
+    # Interactive loop
+    while True:
+        try:
+            user_input = input("\nEnter tool name and params (or 'quit' to exit): ")
+            if user_input.lower() == 'quit':
+                break
+            
+            # Parse the input (simple format: toolname param1=value1 param2=value2)
+            parts = user_input.split()
+            if not parts:
+                continue
+                
+            tool_name = parts[0]
+            params = {}
+            
+            # Parse parameters
+            for part in parts[1:]:
+                if '=' in part:
+                    key, value = part.split('=', 1)
+                    # Try to parse JSON values
+                    try:
+                        params[key] = json.loads(value)
+                    except:
+                        params[key] = value
+            
+            result = client.execute_tool(tool_name, params)
+            print(f"Result: {result}")
+            
+        except Exception as e:
+            print(f"Error: {str(e)}")
+
+if __name__ == "__main__":
+    main()

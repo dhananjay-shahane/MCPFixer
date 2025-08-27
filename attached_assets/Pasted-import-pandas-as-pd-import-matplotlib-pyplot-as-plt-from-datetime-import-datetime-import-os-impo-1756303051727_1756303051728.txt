@@ -1,0 +1,85 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
+import os
+import json
+from fastmcp import FastMCP
+
+mcp = FastMCP("Data Server")
+
+@mcp.resource("csv://{filename}")
+def read_csv(filename: str):
+    """Read CSV file from data directory"""
+    filepath = f"data/{filename}"
+    if os.path.exists(filepath):
+        with open(filepath, 'r') as f:
+            return f.read()
+    return None
+
+@mcp.tool()
+def generate_chart(
+    data_source: str,
+    chart_type: str = 'bar',
+    title: str = 'Chart',
+    x_axis: str = 'x',
+    y_axis: str = 'y'
+):
+    """Generate charts from CSV data"""
+    try:
+        df = pd.read_csv(f'data/{data_source}')
+        
+        plt.figure(figsize=(10, 6))
+        if chart_type == 'bar':
+            plt.bar(df[x_axis], df[y_axis])
+        elif chart_type == 'line':
+            plt.plot(df[x_axis], df[y_axis])
+        elif chart_type == 'scatter':
+            plt.scatter(df[x_axis], df[y_axis])
+        
+        plt.title(title)
+        plt.xlabel(x_axis)
+        plt.ylabel(y_axis)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"output/chart_{timestamp}.png"
+        plt.savefig(filename)
+        plt.close()
+        
+        return f"Chart saved as {filename}"
+    except Exception as e:
+        return f"Error generating chart: {str(e)}"
+
+@mcp.tool()
+def get_data_stats(data_source: str):
+    """Get statistics about CSV data"""
+    try:
+        df = pd.read_csv(f'data/{data_source}')
+        stats = {
+            "columns": list(df.columns),
+            "shape": df.shape,
+            "descriptive_stats": df.describe().to_dict(),
+            "null_counts": df.isnull().sum().to_dict()
+        }
+        return json.dumps(stats, indent=2)
+    except Exception as e:
+        return f"Error getting stats: {str(e)}"
+
+@mcp.tool()
+def filter_data(data_source: str, column: str, value: str):
+    """Filter CSV data by column value"""
+    try:
+        df = pd.read_csv(f'data/{data_source}')
+        filtered = df[df[column] == value]
+        return filtered.to_string(index=False)
+    except Exception as e:
+        return f"Error filtering data: {str(e)}"
+
+@mcp.prompt()
+def data_analysis_prompt(query: str, data_source: str):
+    """Analyze CSV data based on natural language queries"""
+    return f"Analyzing {data_source} with query: {query}"
+
+if __name__ == "__main__":
+    mcp.run(transport='stdio')
