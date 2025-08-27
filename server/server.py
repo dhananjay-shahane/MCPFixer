@@ -16,12 +16,137 @@ mcp = FastMCP("Data Analysis Server")
 
 @mcp.resource("csv://{filename}")
 def read_csv_resource(filename: str):
-    """Read CSV file from data directory as a resource"""
+    """Read CSV file from data directory as a resource for LLM consumption
+    
+    This resource provides direct access to CSV file contents that LLMs can read and understand.
+    The URI pattern csv://filename allows LLMs to request specific CSV files.
+    """
     filepath = f"data/{filename}"
     if os.path.exists(filepath):
-        with open(filepath, 'r') as f:
-            return f.read()
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+        # Return structured content that LLMs can understand
+        return {
+            "uri": f"csv://{filename}",
+            "mimeType": "text/csv",
+            "text": content
+        }
     return None
+
+@mcp.resource("data://file_list")
+def data_file_list_resource():
+    """List all available CSV files as a resource for LLM consumption
+    
+    This resource provides LLMs with a directory of available data files
+    they can request using the csv:// URI pattern.
+    """
+    try:
+        data_dir = "data"
+        if not os.path.exists(data_dir):
+            return None
+            
+        csv_files = [f for f in os.listdir(data_dir) if f.endswith('.csv')]
+        file_info = []
+        
+        for filename in csv_files:
+            filepath = os.path.join(data_dir, filename)
+            file_size = os.path.getsize(filepath)
+            
+            # Get basic info about each file
+            try:
+                df = pd.read_csv(filepath)
+                rows, cols = df.shape
+                columns = list(df.columns)
+            except:
+                rows, cols = 0, 0
+                columns = []
+            
+            file_info.append({
+                "filename": filename,
+                "uri": f"csv://{filename}",
+                "size_bytes": file_size,
+                "rows": rows,
+                "columns": cols,
+                "column_names": columns[:10]  # Limit to first 10 columns for brevity
+            })
+        
+        return {
+            "uri": "data://file_list",
+            "mimeType": "application/json",
+            "text": json.dumps({
+                "available_files": csv_files,
+                "file_details": file_info,
+                "total_files": len(csv_files),
+                "instructions": "Use csv://filename URI pattern to access individual files"
+            }, indent=2)
+        }
+    except Exception as e:
+        return {
+            "uri": "data://file_list",
+            "mimeType": "application/json",
+            "text": json.dumps({"error": str(e)}, indent=2)
+        }
+
+@mcp.resource("schema://{filename}")
+def csv_schema_resource(filename: str):
+    """Get detailed schema information for a CSV file as a resource
+    
+    This resource provides LLMs with detailed schema information about CSV files
+    including column types, sample data, and statistics.
+    """
+    filepath = f"data/{filename}"
+    if not os.path.exists(filepath):
+        return None
+        
+    try:
+        df = pd.read_csv(filepath)
+        
+        schema_info = {
+            "filename": filename,
+            "uri": f"schema://{filename}",
+            "shape": {"rows": len(df), "columns": len(df.columns)},
+            "columns": {},
+            "sample_data": {}
+        }
+        
+        # Get detailed column information
+        for col in df.columns:
+            col_info = {
+                "dtype": str(df[col].dtype),
+                "null_count": int(df[col].isnull().sum()),
+                "unique_values": int(df[col].nunique()),
+                "is_numeric": pd.api.types.is_numeric_dtype(df[col])
+            }
+            
+            # Add statistics for numeric columns
+            if col_info["is_numeric"]:
+                col_info.update({
+                    "min": float(df[col].min()) if not df[col].isnull().all() else None,
+                    "max": float(df[col].max()) if not df[col].isnull().all() else None,
+                    "mean": float(df[col].mean()) if not df[col].isnull().all() else None
+                })
+            
+            # Add sample values
+            sample_values = df[col].dropna().head(3).tolist()
+            col_info["sample_values"] = sample_values
+            
+            schema_info["columns"][col] = col_info
+        
+        # Add sample rows
+        schema_info["sample_data"] = df.head(3).to_dict('records')
+        
+        return {
+            "uri": f"schema://{filename}",
+            "mimeType": "application/json",
+            "text": json.dumps(schema_info, indent=2, default=str)
+        }
+        
+    except Exception as e:
+        return {
+            "uri": f"schema://{filename}",
+            "mimeType": "application/json",
+            "text": json.dumps({"error": str(e)}, indent=2)
+        }
 
 @mcp.tool()
 def read_csv(filename: str):
@@ -203,7 +328,7 @@ def filter_data(data_source: str, column: str, value: str, operation: str = "equ
         return f"Error filtering data: {str(e)}"
 
 @mcp.tool()
-def get_column_info(data_source: str, column: str = None):
+def get_column_info(data_source: str, column: str | None = None):
     """Get detailed information about columns in the dataset
     
     Args:
