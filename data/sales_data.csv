@@ -1,0 +1,16 @@
+Product,Sales,Region,Month,Revenue
+Laptops,150,North,January,75000
+Tablets,200,South,January,60000
+Smartphones,300,East,January,90000
+Laptops,180,North,February,90000
+Tablets,220,South,February,66000
+Smartphones,280,East,February,84000
+Laptops,160,West,March,80000
+Tablets,190,South,March,57000
+Smartphones,320,East,March,96000
+Headphones,400,North,January,40000
+Headphones,450,South,February,45000
+Headphones,380,East,March,38000
+Monitors,80,North,January,64000
+Monitors,90,South,February,72000
+Monitors,75,East,March,60000

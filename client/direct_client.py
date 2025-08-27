@@ -10,35 +10,61 @@ class DirectClient:
     """Direct client for executing MCP server tools without going through the MCP protocol"""
     
     def __init__(self):
-        # Import the actual functions from the server module
+        # Import server module and access the raw functions
         try:
+            import sys
+            import os
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            
+            # Import the server to access the actual tool functions
+            from server.server import mcp
+            
+            # Extract the actual functions from the MCP tools
+            self.available_tools = {}
+            self.mcp_server = mcp
+            
+            # Import individual functions directly since MCP tool decorator wrapping causes issues
             from server.server import (
-                generate_chart, 
-                get_data_stats, 
-                filter_data, 
-                read_csv,
-                get_column_info
+                read_csv as _read_csv,
+                generate_chart as _generate_chart,
+                get_data_stats as _get_data_stats,
+                filter_data as _filter_data,
+                get_column_info as _get_column_info,
+                list_data_files as _list_data_files,
+                execute_script as _execute_script
             )
             
+            # Map tool names to raw functions (bypassing MCP decorators)
             self.available_tools = {
-                "generate_chart": generate_chart,
-                "get_data_stats": get_data_stats,
-                "filter_data": filter_data,
-                "read_csv": read_csv,
-                "get_column_info": get_column_info
+                "read_csv": _read_csv,
+                "generate_chart": _generate_chart,
+                "get_data_stats": _get_data_stats,
+                "filter_data": _filter_data,
+                "get_column_info": _get_column_info,
+                "list_data_files": _list_data_files,
+                "execute_script": _execute_script
             }
-        except ImportError as e:
-            print(f"Error importing server tools: {e}")
+                    
+        except Exception as e:
+            print(f"Error setting up direct client: {e}")
             self.available_tools = {}
     
     def list_tools(self) -> Dict[str, str]:
         """Get a list of available tools with descriptions"""
         return {
             "read_csv": "Read CSV file content from data directory",
-            "get_data_stats": "Get comprehensive statistics about CSV data",
+            "get_data_stats": "Get comprehensive statistics about CSV data", 
             "get_column_info": "Get detailed information about columns in dataset",
             "filter_data": "Filter CSV data by column value with various operations",
-            "generate_chart": "Generate charts from CSV data (bar, line, scatter, pie)"
+            "generate_chart": "Generate charts from CSV data (bar, line, scatter, pie)",
+            "list_data_files": "List all available CSV files in the data directory",
+            "execute_script": "Execute analysis scripts (bar_chart_generator.py, pie_chart_generator.py, data_analyzer.py)"
+        }
+    
+    def list_resources(self) -> Dict[str, str]:
+        """Get a list of available resources"""
+        return {
+            "csv://{filename}": "Access CSV file content as a resource"
         }
     
     def get_tool_info(self, tool_name: str) -> Optional[Dict[str, Any]]:
@@ -86,6 +112,20 @@ class DirectClient:
                     "y_axis": "Column name for y-axis"
                 },
                 "example": {"data_source": "sample_data.csv", "chart_type": "bar", "title": "Age Distribution", "x_axis": "name", "y_axis": "age"}
+            },
+            "list_data_files": {
+                "description": "List all available CSV files in the data directory",
+                "parameters": {},
+                "example": {}
+            },
+            "execute_script": {
+                "description": "Execute analysis scripts with CSV data",
+                "parameters": {
+                    "script_name": "Script to execute (bar_chart_generator.py, pie_chart_generator.py, data_analyzer.py)",
+                    "csv_file": "CSV file to process",
+                    "args": "Additional arguments (optional)"
+                },
+                "example": {"script_name": "bar_chart_generator.py", "csv_file": "sales_data.csv", "args": "Product Sales"}
             }
         }
         return tool_info.get(tool_name)
@@ -102,7 +142,7 @@ class DirectClient:
         try:
             # Call the function with the provided parameters
             result = self.available_tools[tool_name](**params)
-            return result
+            return str(result)
         except TypeError as e:
             tool_info = self.get_tool_info(tool_name)
             if tool_info:

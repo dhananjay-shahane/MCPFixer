@@ -1,0 +1,11 @@
+Item,Quantity,Price,Category,Supplier
+Office Chair,45,299.99,Furniture,OfficeMax
+Desk Lamp,120,79.99,Lighting,IKEA
+Notebook,500,12.99,Stationery,Staples
+Printer,25,499.99,Electronics,HP
+Keyboard,80,89.99,Electronics,Logitech
+Monitor,35,299.99,Electronics,Dell
+Pen Set,300,24.99,Stationery,Parker
+Bookshelf,15,199.99,Furniture,IKEA
+Whiteboard,20,149.99,Office,3M
+Calculator,60,39.99,Electronics,Casio

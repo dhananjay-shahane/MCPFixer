@@ -3,8 +3,10 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import os
 import json
+import sys
 from fastmcp import FastMCP
 import numpy as np
+import subprocess
 
 # Create output directory if it doesn't exist
 os.makedirs("output", exist_ok=True)
@@ -79,7 +81,9 @@ def generate_chart(
             plt.xlabel(x_axis)
             plt.ylabel(y_axis)
         elif chart_type == 'pie':
-            plt.pie(df[x_axis], labels=df.index if len(df) < 20 else None, autopct='%1.1f%%')
+            # Group by x_axis and sum y_axis values
+            grouped_data = df.groupby(x_axis)[y_axis].sum() if y_axis in df.columns else df[x_axis].value_counts()
+            plt.pie(grouped_data.values, labels=grouped_data.index, autopct='%1.1f%%')
         else:
             return f"Unsupported chart type: {chart_type}. Supported types: bar, line, scatter, pie"
         
@@ -115,13 +119,12 @@ def get_data_stats(data_source: str):
             "file_info": {
                 "filename": data_source,
                 "shape": df.shape,
-                "size_mb": round(os.path.getsize(filepath) / (1024*1024), 2)
+                "size_mb": round(os.path.getsize(filepath) / (1024*1024), 4)
             },
             "columns": list(df.columns),
-            "data_types": df.dtypes.to_dict(),
+            "data_types": df.dtypes.astype(str).to_dict(),
             "null_counts": df.isnull().sum().to_dict(),
-            "null_percentages": (df.isnull().sum() / len(df) * 100).to_dict(),
-            "memory_usage": df.memory_usage(deep=True).to_dict()
+            "null_percentages": (df.isnull().sum() / len(df) * 100).round(2).to_dict(),
         }
         
         # Add descriptive statistics for numeric columns
@@ -223,23 +226,27 @@ def get_column_info(data_source: str, column: str = None):
         for col in columns_to_analyze:
             info = {
                 "data_type": str(df[col].dtype),
-                "non_null_count": df[col].count(),
-                "null_count": df[col].isnull().sum(),
-                "unique_values": df[col].nunique(),
+                "null_count": int(df[col].isnull().sum()),
+                "null_percentage": round(df[col].isnull().sum() / len(df) * 100, 2),
+                "unique_values": int(df[col].nunique()),
+                "memory_usage": int(df[col].memory_usage(deep=True))
             }
             
-            if df[col].dtype in ['object']:
-                # String/categorical column
-                info["sample_values"] = df[col].dropna().unique()[:10].tolist()
-                if df[col].nunique() <= 50:
-                    info["value_counts"] = df[col].value_counts().head(10).to_dict()
+            # Add statistics based on data type
+            if pd.api.types.is_numeric_dtype(df[col]):
+                info.update({
+                    "min": float(df[col].min()) if not df[col].isnull().all() else None,
+                    "max": float(df[col].max()) if not df[col].isnull().all() else None,
+                    "mean": float(df[col].mean()) if not df[col].isnull().all() else None,
+                    "median": float(df[col].median()) if not df[col].isnull().all() else None,
+                    "std": float(df[col].std()) if not df[col].isnull().all() else None
+                })
             else:
-                # Numeric column
-                info["min"] = df[col].min()
-                info["max"] = df[col].max()
-                info["mean"] = df[col].mean()
-                info["median"] = df[col].median()
-                info["std"] = df[col].std()
+                # For non-numeric columns, show top values
+                if df[col].nunique() <= 10:
+                    info["top_values"] = df[col].value_counts().head(10).to_dict()
+                else:
+                    info["sample_values"] = df[col].dropna().head(5).tolist()
             
             column_info[col] = info
         
@@ -248,22 +255,72 @@ def get_column_info(data_source: str, column: str = None):
     except Exception as e:
         return f"Error getting column info: {str(e)}"
 
-@mcp.prompt()
-def data_analysis_prompt(query: str, data_source: str):
-    """Analyze CSV data based on natural language queries"""
-    return f"""
-    I have a CSV file named '{data_source}' and the user wants to: {query}
+@mcp.tool()
+def list_data_files():
+    """List all available CSV files in the data directory"""
+    try:
+        data_dir = "data"
+        if not os.path.exists(data_dir):
+            return "Data directory not found"
+        
+        csv_files = [f for f in os.listdir(data_dir) if f.endswith('.csv')]
+        return json.dumps({"available_files": csv_files}, indent=2)
+        
+    except Exception as e:
+        return f"Error listing files: {str(e)}"
+
+@mcp.tool() 
+def execute_script(script_name: str, csv_file: str, *args):
+    """Execute a script from the scripts directory with CSV file and arguments
     
-    Available tools:
-    1. read_csv(filename) - Read the CSV file content
-    2. get_data_stats(data_source) - Get comprehensive statistics
-    3. get_column_info(data_source, column) - Get detailed column information
-    4. filter_data(data_source, column, value, operation) - Filter data
-    5. generate_chart(data_source, chart_type, title, x_axis, y_axis) - Create visualizations
-    
-    Please suggest the most appropriate tool(s) to use for this query.
+    Args:
+        script_name: Name of the script to execute (bar_chart_generator.py, pie_chart_generator.py, data_analyzer.py)
+        csv_file: CSV file to process
+        *args: Additional arguments to pass to the script
     """
+    try:
+        script_path = f"scripts/{script_name}"
+        if not os.path.exists(script_path):
+            available_scripts = [f for f in os.listdir("scripts") if f.endswith('.py')]
+            return f"Script {script_name} not found. Available scripts: {available_scripts}"
+        
+        csv_path = f"data/{csv_file}"
+        if not os.path.exists(csv_path):
+            return f"CSV file {csv_file} not found in data directory"
+        
+        # Build command
+        cmd = [sys.executable, script_path, csv_path] + list(args)
+        
+        # Execute script
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=".")
+        
+        if result.returncode == 0:
+            return f"Script executed successfully:\n{result.stdout}"
+        else:
+            return f"Script execution failed:\n{result.stderr}"
+            
+    except Exception as e:
+        return f"Error executing script: {str(e)}"
+
+@mcp.prompt()
+def analyze_data_prompt(csv_file: str, question: str):
+    """Analyze data and provide insights based on user question
+    
+    Args:
+        csv_file: Name of the CSV file to analyze
+        question: User's question about the data
+    """
+    return f"""You are a data analysis assistant. Analyze the CSV file '{csv_file}' and answer this question: {question}
+
+Available tools:
+- read_csv: Read the CSV file content
+- get_data_stats: Get statistical summary
+- get_column_info: Get column details  
+- filter_data: Filter data by conditions
+- generate_chart: Create visualizations
+- execute_script: Run analysis scripts
+
+Provide insights and suggest visualizations that would help answer the question."""
 
 if __name__ == "__main__":
-    print("Starting MCP Data Analysis Server...")
-    mcp.run(transport='stdio')
+    mcp.run()

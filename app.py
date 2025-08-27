@@ -34,7 +34,11 @@ def index():
         # Get available data files for context
         data_files = client.list_data_files()
         
-        return render_template('chat.html', data_files=data_files)
+        # Get available tools and resources for the UI
+        tools = client.list_tools()
+        resources = client.list_resources() if hasattr(client, 'list_resources') else {}
+        
+        return render_template('chat.html', data_files=data_files, tools=tools, resources=resources)
     except Exception as e:
         return f"Error loading chat interface: {str(e)}", 500
 
@@ -114,6 +118,30 @@ def upload_file():
             'success': True,
             'message': f'File {file.filename} uploaded successfully',
             'filename': file.filename
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/tools')
+def get_tools():
+    """Get available tools and resources"""
+    try:
+        from client.direct_client import DirectClient
+        client = DirectClient()
+        
+        tools = client.list_tools()
+        resources = client.list_resources() if hasattr(client, 'list_resources') else {}
+        data_files = client.list_data_files()
+        
+        return jsonify({
+            'success': True,
+            'tools': tools,
+            'resources': resources,
+            'data_files': data_files
         })
         
     except Exception as e:
