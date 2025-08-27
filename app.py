@@ -17,193 +17,6 @@ sys.path.insert(0, str(current_dir))
 # Initialize Flask app
 app = Flask(__name__)
 
-def simple_query_parser(query, direct_client):
-    """Enhanced keyword-based query parser when Ollama is not available"""
-    query_lower = query.lower()
-    
-    # Get available data files
-    data_files = direct_client.list_data_files()
-    default_file = data_files[0] if data_files else None
-    
-    # Try to extract specific filename from query
-    detected_file = None
-    for file in data_files:
-        if file.lower() in query_lower or file.split('.')[0].lower() in query_lower:
-            detected_file = file
-            break
-    
-    # Use detected file or default
-    target_file = detected_file or default_file
-    
-    # Enhanced pattern matching for different types of queries
-    
-    # Statistics and analysis queries
-    if any(word in query_lower for word in ['stats', 'statistics', 'summary', 'analyze', 'analysis', 'info', 'describe', 'overview']):
-        if target_file:
-            return {
-                "tool": "get_data_stats",
-                "parameters": {"data_source": target_file},
-                "explanation": f"📊 Analyzing {target_file} and generating comprehensive statistics including data types, missing values, and summary statistics."
-            }
-        else:
-            return {
-                "tool": None,
-                "parameters": {},
-                "explanation": "📁 I'd love to analyze your data! Please upload a CSV file first, then ask me to analyze it."
-            }
-    
-    # Chart and visualization queries
-    elif any(word in query_lower for word in ['chart', 'graph', 'plot', 'visualize', 'visualization', 'draw']):
-        if target_file:
-            # Smart chart type detection
-            chart_type = "bar"
-            if any(word in query_lower for word in ['line', 'trend', 'time', 'over time']):
-                chart_type = "line"
-            elif any(word in query_lower for word in ['scatter', 'correlation', 'relationship']):
-                chart_type = "scatter"
-            elif any(word in query_lower for word in ['pie', 'distribution', 'proportion']):
-                chart_type = "pie"
-            
-            # Try to detect column names from query
-            # Get column info first to make better assumptions
-            try:
-                column_result = direct_client.execute_tool("get_column_info", {"data_source": target_file})
-                # This is a simplified approach - in reality you'd parse the JSON response
-                x_axis = "index"  # Safe default
-                y_axis = "value"  # Safe default
-            except:
-                x_axis = "index"
-                y_axis = "value"
-            
-            return {
-                "tool": "generate_chart",
-                "parameters": {
-                    "data_source": target_file,
-                    "chart_type": chart_type,
-                    "title": f"{target_file.split('.')[0]} - {chart_type.title()} Chart",
-                    "x_axis": x_axis,
-                    "y_axis": y_axis
-                },
-                "explanation": f"📈 Creating a {chart_type} chart from {target_file}. I'll use the most suitable columns for visualization."
-            }
-        else:
-            return {
-                "tool": None,
-                "parameters": {},
-                "explanation": "📊 I'd love to create a chart for you! Please upload a CSV file first."
-            }
-    
-    # Data reading and display queries
-    elif any(word in query_lower for word in ['read', 'show', 'display', 'content', 'view', 'see', 'preview']):
-        if target_file:
-            return {
-                "tool": "read_csv",
-                "parameters": {"filename": target_file},
-                "explanation": f"📋 Reading and displaying the contents of {target_file}."
-            }
-        else:
-            return {
-                "tool": None,
-                "parameters": {},
-                "explanation": "📄 I'd love to show your data! Please upload a CSV file first."
-            }
-    
-    # Column information queries
-    elif any(word in query_lower for word in ['column', 'columns', 'field', 'fields', 'structure', 'schema']):
-        if target_file:
-            return {
-                "tool": "get_column_info",
-                "parameters": {"data_source": target_file},
-                "explanation": f"🏗️ Getting detailed information about the structure and columns in {target_file}."
-            }
-        else:
-            return {
-                "tool": None,
-                "parameters": {},
-                "explanation": "🗂️ I'd love to show column information! Please upload a CSV file first."
-            }
-    
-    # Filter queries (enhanced parsing)
-    elif any(word in query_lower for word in ['filter', 'search', 'find', 'where', 'select']):
-        if target_file:
-            # Try to extract filter conditions
-            # Look for patterns like "where X > Y" or "X equals Y"
-            filter_patterns = [
-                (r'where\s+(\w+)\s*([><=!]+)\s*(\w+)', 'where clause'),
-                (r'(\w+)\s*(equals?|is|=)\s*(\w+)', 'equals condition'),
-                (r'(\w+)\s*>\s*(\w+)', 'greater than'),
-                (r'(\w+)\s*<\s*(\w+)', 'less than')
-            ]
-            
-            for pattern, description in filter_patterns:
-                match = re.search(pattern, query_lower)
-                if match:
-                    column = match.group(1)
-                    if len(match.groups()) >= 3:
-                        value = match.group(3)
-                        operator = match.group(2) if len(match.groups()) >= 3 else 'equals'
-                        
-                        operation = 'equals'
-                        if '>' in operator:
-                            operation = 'greater'
-                        elif '<' in operator:
-                            operation = 'less'
-                        elif '!' in operator or 'not' in operator:
-                            operation = 'not_equals'
-                        
-                        return {
-                            "tool": "filter_data",
-                            "parameters": {
-                                "data_source": target_file,
-                                "column": column,
-                                "value": value,
-                                "operation": operation
-                            },
-                            "explanation": f"🔍 Filtering {target_file} where {column} {operation} {value}."
-                        }
-            
-            # If no specific pattern found, ask for clarification
-            return {
-                "tool": None,
-                "parameters": {},
-                "explanation": f"🔍 I can filter {target_file} for you! Please specify the condition more clearly, like: 'show rows where age > 25' or 'filter by department equals Engineering'."
-            }
-        else:
-            return {
-                "tool": None,
-                "parameters": {},
-                "explanation": "🔍 I'd love to filter data for you! Please upload a CSV file first."
-            }
-    
-    # Help and greeting queries
-    elif any(word in query_lower for word in ['help', 'hello', 'hi', 'what', 'how', 'can you']):
-        if data_files:
-            return {
-                "tool": None,
-                "parameters": {},
-                "explanation": f"👋 Hi! I'm your AI data analysis assistant. I can help you with:\n\n📊 **Analysis**: 'analyze {data_files[0]}'\n📈 **Charts**: 'create a bar chart'\n📋 **View data**: 'show me the data'\n🏗️ **Structure**: 'show columns'\n🔍 **Filter**: 'filter where age > 25'\n\nAvailable files: {', '.join(data_files)}\n\nWhat would you like to explore?"
-            }
-        else:
-            return {
-                "tool": None,
-                "parameters": {},
-                "explanation": "👋 Hello! I'm your AI data analysis assistant. I can help you analyze CSV files, create charts, and explore your data.\n\n🚀 **Get started**: Upload a CSV file, then ask me questions like:\n• 'analyze my data'\n• 'create a chart'\n• 'show me the columns'\n\nWhat data would you like to explore today?"
-            }
-    
-    # Default response for unclear queries
-    else:
-        if data_files:
-            return {
-                "tool": None,
-                "parameters": {},
-                "explanation": f"🤔 I'm not sure exactly what you want to do, but I can help you with your data! Available files: {', '.join(data_files)}\n\nTry asking:\n• 'analyze data' - for statistics\n• 'create chart' - for visualizations\n• 'show data' - to view contents\n• 'show columns' - for structure info"
-            }
-        else:
-            return {
-                "tool": None,
-                "parameters": {},
-                "explanation": "🤖 I'm your data analysis assistant! Upload a CSV file to get started, then I can help you analyze it, create charts, and explore your data.\n\nOnce you upload a file, try asking:\n• 'analyze my data'\n• 'create a bar chart'\n• 'show me the data'"
-            }
 
 # Ensure required directories exist
 os.makedirs("data", exist_ok=True)
@@ -241,69 +54,35 @@ def chat():
         # Initialize clients
         direct_client = DirectClient()
         
-        # Try to connect to Ollama, but fall back to simple parsing if it fails
-        try:
-            # Check if we have an external Ollama URL in environment
-            import os
-            ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
-            ollama_client = OllamaClient(model="llama3.2", base_url=ollama_url)
+        # Get Ollama URL from environment or use default
+        ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
+        ollama_client = OllamaClient(model="llama3.2", base_url=ollama_url)
+        
+        # Process query with Ollama
+        response = ollama_client.process_query(user_query)
+        
+        if response and response.get("tool"):
+            # Execute the suggested tool
+            tool_result = direct_client.execute_tool(
+                response["tool"], 
+                response["parameters"]
+            )
             
-            # Test connection first
-            import requests
-            test_response = requests.get(f"{ollama_url}/api/tags", timeout=3)
-            if test_response.status_code != 200:
-                raise ConnectionError("Ollama not accessible")
-            
-            # Process query with Ollama
-            response = ollama_client.process_query(user_query)
-            
-            if response and response.get("tool"):
-                # Execute the suggested tool
-                tool_result = direct_client.execute_tool(
-                    response["tool"], 
-                    response["parameters"]
-                )
-                
-                return jsonify({
-                    'success': True,
-                    'ai_response': response['explanation'],
-                    'tool_used': response['tool'],
-                    'tool_parameters': response['parameters'],
-                    'tool_result': tool_result
-                })
-            else:
-                # Just return AI explanation
-                return jsonify({
-                    'success': True,
-                    'ai_response': response['explanation'] if response else "I couldn't process your request.",
-                    'tool_used': None,
-                    'tool_result': None
-                })
-                
-        except (ConnectionError, requests.exceptions.RequestException, requests.exceptions.Timeout):
-            # Fallback: Simple keyword-based tool selection
-            response = simple_query_parser(user_query, direct_client)
-            
-            if response.get("tool"):
-                tool_result = direct_client.execute_tool(
-                    response["tool"], 
-                    response["parameters"]
-                )
-                
-                return jsonify({
-                    'success': True,
-                    'ai_response': response['explanation'],
-                    'tool_used': response['tool'],
-                    'tool_parameters': response['parameters'],
-                    'tool_result': tool_result
-                })
-            else:
-                return jsonify({
-                    'success': True,
-                    'ai_response': response['explanation'],
-                    'tool_used': None,
-                    'tool_result': None
-                })
+            return jsonify({
+                'success': True,
+                'ai_response': response['explanation'],
+                'tool_used': response['tool'],
+                'tool_parameters': response['parameters'],
+                'tool_result': tool_result
+            })
+        else:
+            # Just return AI explanation
+            return jsonify({
+                'success': True,
+                'ai_response': response['explanation'] if response else "I couldn't process your request.",
+                'tool_used': None,
+                'tool_result': None
+            })
         
     except Exception as e:
         return jsonify({
