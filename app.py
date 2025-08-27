@@ -54,17 +54,264 @@ class MCPClient:
             if not self.connect_to_server():
                 raise RuntimeError("Cannot connect to MCP server")
         
-        # Access tools directly from the FastMCP server
-        if hasattr(self.mcp_server, '_tool_manager') and tool_name in self.mcp_server._tool_manager._tools:
-            tool = self.mcp_server._tool_manager._tools[tool_name]
-            tool_func = tool.function if hasattr(tool, 'function') else getattr(tool, 'func', None)
+        # Import the server module and get functions directly
+        try:
+            import server.server as server
             
-            if tool_func:
-                return tool_func(**tool_args)
+            # Access the underlying functions from FastMCP wrapped functions
+            def get_actual_function(wrapped_func):
+                if hasattr(wrapped_func, 'func'):
+                    return wrapped_func.func
+                elif hasattr(wrapped_func, 'function'):
+                    return wrapped_func.function
+                elif hasattr(wrapped_func, '__wrapped__'):
+                    return wrapped_func.__wrapped__
+                elif callable(wrapped_func):
+                    return wrapped_func
+                else:
+                    return None
+            
+            # Map tool names to actual functions
+            tool_functions = {
+                "read_csv": get_actual_function(server.read_csv),
+                "generate_chart": get_actual_function(server.generate_chart),
+                "get_data_stats": get_actual_function(server.get_data_stats),
+                "filter_data": get_actual_function(server.filter_data),
+                "get_column_info": get_actual_function(server.get_column_info),
+                "list_data_files": get_actual_function(server.list_data_files),
+                "execute_script": get_actual_function(server.execute_script)
+            }
+            
+            if tool_name in tool_functions and tool_functions[tool_name]:
+                return tool_functions[tool_name](**tool_args)
             else:
-                raise RuntimeError(f"Tool function not found for {tool_name}")
-        else:
-            raise RuntimeError(f"Tool {tool_name} not found")
+                # Fallback: try calling the wrapped function directly
+                wrapped_functions = {
+                    "read_csv": server.read_csv,
+                    "generate_chart": server.generate_chart,
+                    "get_data_stats": server.get_data_stats,
+                    "filter_data": server.filter_data,
+                    "get_column_info": server.get_column_info,
+                    "list_data_files": server.list_data_files,
+                    "execute_script": server.execute_script
+                }
+                
+                if tool_name in wrapped_functions:
+                    # Try to call the tool through FastMCP's call interface
+                    wrapped_func = wrapped_functions[tool_name]
+                    if hasattr(wrapped_func, '__call__'):
+                        try:
+                            return wrapped_func(**tool_args)
+                        except Exception as call_error:
+                            # Final fallback: direct function implementations
+                            return self._fallback_tool_implementation(tool_name, tool_args)
+                    
+                available_tools = list(tool_functions.keys())
+                raise RuntimeError(f"Tool {tool_name} not found. Available tools: {available_tools}")
+                
+        except ImportError as e:
+            raise RuntimeError(f"Cannot import server module: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Error calling tool {tool_name}: {e}")
+    
+    def _fallback_tool_implementation(self, tool_name: str, tool_args: dict):
+        """Direct implementation of all tools to bypass FastMCP wrapping issues"""
+        import os
+        import json
+        import pandas as pd
+        import matplotlib.pyplot as plt
+        from datetime import datetime
+        import numpy as np
+        
+        try:
+            if tool_name == "list_data_files":
+                data_dir = "data"
+                if not os.path.exists(data_dir):
+                    os.makedirs(data_dir, exist_ok=True)
+                    return json.dumps({"available_files": []})
+                
+                csv_files = [f for f in os.listdir(data_dir) if f.endswith('.csv')]
+                return json.dumps({"available_files": csv_files})
+            
+            elif tool_name == "read_csv":
+                filename = tool_args.get("filename", "")
+                filepath = f"data/{filename}"
+                if os.path.exists(filepath):
+                    df = pd.read_csv(filepath)
+                    return df.to_string(index=False)
+                else:
+                    return f"File {filename} not found in data directory"
+            
+            elif tool_name == "get_data_stats":
+                data_source = tool_args.get("data_source", "")
+                filepath = f'data/{data_source}'
+                if not os.path.exists(filepath):
+                    return f"Data file {data_source} not found in data directory"
+                    
+                df = pd.read_csv(filepath)
+                
+                stats = {
+                    "file_info": {
+                        "filename": data_source,
+                        "shape": df.shape,
+                        "size_mb": round(os.path.getsize(filepath) / (1024*1024), 4)
+                    },
+                    "columns": list(df.columns),
+                    "data_types": df.dtypes.astype(str).to_dict(),
+                    "null_counts": df.isnull().sum().to_dict(),
+                    "null_percentages": (df.isnull().sum() / len(df) * 100).round(2).to_dict(),
+                }
+                
+                # Add descriptive statistics for numeric columns
+                numeric_cols = df.select_dtypes(include=[np.number]).columns
+                if len(numeric_cols) > 0:
+                    stats["numeric_statistics"] = df[numeric_cols].describe().to_dict()
+                
+                # Add value counts for categorical columns
+                categorical_cols = df.select_dtypes(include=['object']).columns
+                categorical_stats = {}
+                for col in categorical_cols:
+                    if df[col].nunique() <= 20:
+                        categorical_stats[col] = df[col].value_counts().to_dict()
+                
+                if categorical_stats:
+                    stats["categorical_statistics"] = categorical_stats
+                
+                return json.dumps(stats, indent=2, default=str)
+            
+            elif tool_name == "generate_chart":
+                data_source = tool_args.get("data_source", "")
+                chart_type = tool_args.get("chart_type", "bar")
+                title = tool_args.get("title", "Chart")
+                x_axis = tool_args.get("x_axis", "x")
+                y_axis = tool_args.get("y_axis", "y")
+                
+                filepath = f'data/{data_source}'
+                if not os.path.exists(filepath):
+                    return f"Data file {data_source} not found in data directory"
+                    
+                df = pd.read_csv(filepath)
+                
+                if x_axis not in df.columns:
+                    return f"Column '{x_axis}' not found in data. Available columns: {list(df.columns)}"
+                
+                if y_axis not in df.columns and chart_type != 'pie':
+                    return f"Column '{y_axis}' not found in data. Available columns: {list(df.columns)}"
+                
+                os.makedirs("output", exist_ok=True)
+                plt.figure(figsize=(12, 8))
+                
+                if chart_type == 'bar':
+                    plt.bar(df[x_axis], df[y_axis])
+                    plt.xlabel(x_axis)
+                    plt.ylabel(y_axis)
+                elif chart_type == 'line':
+                    plt.plot(df[x_axis], df[y_axis], marker='o')
+                    plt.xlabel(x_axis)
+                    plt.ylabel(y_axis)
+                elif chart_type == 'scatter':
+                    plt.scatter(df[x_axis], df[y_axis])
+                    plt.xlabel(x_axis)
+                    plt.ylabel(y_axis)
+                elif chart_type == 'pie':
+                    grouped_data = df.groupby(x_axis)[y_axis].sum() if y_axis in df.columns else df[x_axis].value_counts()
+                    plt.pie(grouped_data.values, labels=grouped_data.index, autopct='%1.1f%%')
+                else:
+                    return f"Unsupported chart type: {chart_type}. Supported types: bar, line, scatter, pie"
+                
+                plt.title(title)
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"output/chart_{chart_type}_{timestamp}.png"
+                plt.savefig(filename, dpi=300, bbox_inches='tight')
+                plt.close()
+                
+                return f"Chart saved as {filename}"
+            
+            elif tool_name == "get_column_info":
+                data_source = tool_args.get("data_source", "")
+                column = tool_args.get("column", None)
+                
+                filepath = f'data/{data_source}'
+                if not os.path.exists(filepath):
+                    return f"Data file {data_source} not found in data directory"
+                    
+                df = pd.read_csv(filepath)
+                
+                if column and column not in df.columns:
+                    return f"Column '{column}' not found in data. Available columns: {list(df.columns)}"
+                
+                columns_to_analyze = [column] if column else df.columns
+                column_info = {}
+                
+                for col in columns_to_analyze:
+                    info = {
+                        "data_type": str(df[col].dtype),
+                        "null_count": int(df[col].isnull().sum()),
+                        "null_percentage": round(df[col].isnull().sum() / len(df) * 100, 2),
+                        "unique_values": int(df[col].nunique()),
+                        "memory_usage": int(df[col].memory_usage(deep=True))
+                    }
+                    
+                    if pd.api.types.is_numeric_dtype(df[col]):
+                        info.update({
+                            "min": float(df[col].min()) if not df[col].isnull().all() else None,
+                            "max": float(df[col].max()) if not df[col].isnull().all() else None,
+                            "mean": float(df[col].mean()) if not df[col].isnull().all() else None,
+                            "median": float(df[col].median()) if not df[col].isnull().all() else None,
+                            "std": float(df[col].std()) if not df[col].isnull().all() else None
+                        })
+                    else:
+                        if df[col].nunique() <= 10:
+                            info["top_values"] = df[col].value_counts().head(10).to_dict()
+                        else:
+                            info["sample_values"] = df[col].dropna().head(5).tolist()
+                    
+                    column_info[col] = info
+                
+                return json.dumps(column_info, indent=2, default=str)
+            
+            elif tool_name == "filter_data":
+                data_source = tool_args.get("data_source", "")
+                column = tool_args.get("column", "")
+                value = tool_args.get("value", "")
+                operation = tool_args.get("operation", "equals")
+                
+                filepath = f'data/{data_source}'
+                if not os.path.exists(filepath):
+                    return f"Data file {data_source} not found in data directory"
+                    
+                df = pd.read_csv(filepath)
+                
+                if column not in df.columns:
+                    return f"Column '{column}' not found in data. Available columns: {list(df.columns)}"
+                
+                try:
+                    if operation == "equals":
+                        filtered_df = df[df[column] == value]
+                    elif operation == "contains":
+                        filtered_df = df[df[column].astype(str).str.contains(str(value), na=False)]
+                    elif operation == "greater":
+                        filtered_df = df[pd.to_numeric(df[column], errors='coerce') > float(value)]
+                    elif operation == "less":
+                        filtered_df = df[pd.to_numeric(df[column], errors='coerce') < float(value)]
+                    elif operation == "not_equals":
+                        filtered_df = df[df[column] != value]
+                    else:
+                        return f"Unsupported operation: {operation}. Supported: equals, contains, greater, less, not_equals"
+                    
+                    return filtered_df.to_string(index=False)
+                    
+                except Exception as e:
+                    return f"Error filtering data: {str(e)}"
+            
+            else:
+                return f"Tool {tool_name} not implemented in fallback"
+                
+        except Exception as e:
+            return f"Error in fallback implementation for {tool_name}: {str(e)}"
     
     def list_tools(self):
         """List available tools from MCP server"""
@@ -72,13 +319,16 @@ class MCPClient:
             if not self.connect_to_server():
                 return []
         
-        tools = []
-        if hasattr(self.mcp_server, '_tool_manager') and hasattr(self.mcp_server._tool_manager, '_tools'):
-            for tool_name, tool in self.mcp_server._tool_manager._tools.items():
-                tools.append({
-                    "name": tool_name,
-                    "description": getattr(tool, 'description', f"MCP tool: {tool_name}") or f"MCP tool: {tool_name}"
-                })
+        # Return hardcoded list of available tools
+        tools = [
+            {"name": "read_csv", "description": "Read CSV file from data directory"},
+            {"name": "generate_chart", "description": "Generate charts from CSV data"},
+            {"name": "get_data_stats", "description": "Get comprehensive statistics about CSV data"},
+            {"name": "filter_data", "description": "Filter CSV data by column value"},
+            {"name": "get_column_info", "description": "Get detailed information about columns"},
+            {"name": "list_data_files", "description": "List all available CSV files"},
+            {"name": "execute_script", "description": "Execute custom analysis scripts"}
+        ]
         return tools
     
     def list_resources(self):
@@ -87,8 +337,13 @@ class MCPClient:
             if not self.connect_to_server():
                 return []
         
+        if not self.mcp_server:
+            return []
+        
         resources = []
-        if hasattr(self.mcp_server, '_resource_manager') and hasattr(self.mcp_server._resource_manager, '_resources'):
+        if (hasattr(self.mcp_server, '_resource_manager') and 
+            self.mcp_server._resource_manager is not None and 
+            hasattr(self.mcp_server._resource_manager, '_resources')):
             for resource_pattern, resource in self.mcp_server._resource_manager._resources.items():
                 resources.append({
                     "uri": resource_pattern,
@@ -180,6 +435,8 @@ def chat():
             return jsonify({'error': 'Message or tool name is required'}), 400
         
         # Use synchronous function to avoid async issues
+        if tool_params is None:
+            tool_params = {}
         result = process_query_sync(user_query, tool_name, tool_params)
         return jsonify(result)
         
