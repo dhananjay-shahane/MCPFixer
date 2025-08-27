@@ -129,14 +129,71 @@
             bottom: 10px;
             text-align: center;
         }
+        .tools-panel {
+            position: fixed;
+            top: 0;
+            right: -400px;
+            width: 400px;
+            height: 100vh;
+            background: white;
+            box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+            transition: right 0.3s ease;
+            z-index: 1000;
+            overflow-y: auto;
+        }
+        .tools-panel.open {
+            right: 0;
+        }
+        .tools-panel-header {
+            background: linear-gradient(90deg, #4CAF50, #45a049);
+            color: white;
+            padding: 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        .tools-section {
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .tool-item, .file-item {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 10px;
+            margin: 5px 0;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .tool-item:hover, .file-item:hover {
+            background: #e9ecef;
+            border-color: #4CAF50;
+        }
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 999;
+            display: none;
+        }
     </style>
 </head>
 <body>
     <div class="chat-container">
         <div class="chat-header">
-            <h2><i class="fas fa-robot"></i> AI Data Analysis Assistant</h2>
-            <p class="mb-0">Ask me anything about your data!</p>
-        </div>
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h2><i class="fas fa-robot"></i> AI Data Analysis Assistant</h2>
+                    <p class="mb-0">Ask me anything about your data!</p>
+                </div>
+                <button class="btn btn-success btn-lg" id="toolsButton" onclick="toggleToolsPanel()" title="Show Tools & Resources">
+                    <i class="fas fa-cog"></i> Show Tools & Resources
+                </button>
+            </div>
+        </div></div>
         
         <div class="chat-messages" id="chatMessages">
             {% if data_files %}
@@ -169,6 +226,58 @@
                 <button class="send-button ms-2" onclick="sendMessage()">
                     <i class="fas fa-paper-plane"></i>
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tools Panel -->
+    <div class="overlay" id="overlay" onclick="toggleToolsPanel()"></div>
+    <div class="tools-panel" id="toolsPanel">
+        <div class="tools-panel-header">
+            <div class="d-flex justify-content-between align-items-center">
+                <h4><i class="fas fa-cog"></i> Tools & Resources</h4>
+                <button class="btn btn-outline-light btn-sm" onclick="toggleToolsPanel()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+        
+        <div class="tools-section">
+            <h5><i class="fas fa-tools"></i> Available Tools</h5>
+            <div id="toolsList">
+                {% for tool, desc in tools.items() %}
+                <div class="tool-item" onclick="insertTool('{{ tool }}')">
+                    <strong>{{ tool }}</strong>
+                    <br><small class="text-muted">{{ desc }}</small>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <div class="tools-section">
+            <h5><i class="fas fa-database"></i> Data Files</h5>
+            <div id="filesList">
+                {% for file in data_files %}
+                <div class="file-item" onclick="insertFile('{{ file }}')">
+                    <i class="fas fa-file-csv"></i> {{ file }}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <div class="tools-section">
+            <h5><i class="fas fa-lightbulb"></i> Quick Examples</h5>
+            <div class="tool-item" onclick="insertExample('read sample_data.csv')">
+                <strong>Read CSV File</strong>
+                <br><small class="text-muted">Example: read sample_data.csv</small>
+            </div>
+            <div class="tool-item" onclick="insertExample('create a bar chart from sales_data.csv')">
+                <strong>Create Chart</strong>
+                <br><small class="text-muted">Example: create a bar chart from sales_data.csv</small>
+            </div>
+            <div class="tool-item" onclick="insertExample('get stats for employee_data.csv')">
+                <strong>Get Statistics</strong>
+                <br><small class="text-muted">Example: get stats for employee_data.csv</small>
             </div>
         </div>
     </div>
@@ -279,6 +388,43 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function toggleToolsPanel() {
+            const panel = document.getElementById('toolsPanel');
+            const overlay = document.getElementById('overlay');
+            const button = document.getElementById('toolsButton');
+            
+            if (panel.classList.contains('open')) {
+                panel.classList.remove('open');
+                overlay.style.display = 'none';
+                button.innerHTML = '<i class="fas fa-cog"></i> Show Tools & Resources';
+            } else {
+                panel.classList.add('open');
+                overlay.style.display = 'block';
+                button.innerHTML = '<i class="fas fa-cog"></i> Hide Tools & Resources';
+            }
+        }
+
+        function insertTool(toolName) {
+            const input = document.getElementById('messageInput');
+            input.value = `Use ${toolName} tool`;
+            input.focus();
+            toggleToolsPanel();
+        }
+
+        function insertFile(filename) {
+            const input = document.getElementById('messageInput');
+            input.value = `read ${filename}`;
+            input.focus();
+            toggleToolsPanel();
+        }
+
+        function insertExample(example) {
+            const input = document.getElementById('messageInput');
+            input.value = example;
+            input.focus();
+            toggleToolsPanel();
         }
 
         // Focus on input when page loads
