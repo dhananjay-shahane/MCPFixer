@@ -270,13 +270,13 @@ def list_data_files():
         return f"Error listing files: {str(e)}"
 
 @mcp.tool() 
-def execute_script(script_name: str, csv_file: str, *args):
+def execute_script(script_name: str, csv_file: str, args: str = ""):
     """Execute a script from the scripts directory with CSV file and arguments
     
     Args:
         script_name: Name of the script to execute (bar_chart_generator.py, pie_chart_generator.py, data_analyzer.py)
         csv_file: CSV file to process
-        *args: Additional arguments to pass to the script
+        args: Additional arguments to pass to the script as string
     """
     try:
         script_path = f"scripts/{script_name}"
@@ -289,7 +289,9 @@ def execute_script(script_name: str, csv_file: str, *args):
             return f"CSV file {csv_file} not found in data directory"
         
         # Build command
-        cmd = [sys.executable, script_path, csv_path] + list(args)
+        cmd = [sys.executable, script_path, csv_path]
+        if args:
+            cmd.extend(args.split())
         
         # Execute script
         result = subprocess.run(cmd, capture_output=True, text=True, cwd=".")

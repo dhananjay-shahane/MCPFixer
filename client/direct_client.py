@@ -123,7 +123,7 @@ class DirectClient:
                 "parameters": {
                     "script_name": "Script to execute (bar_chart_generator.py, pie_chart_generator.py, data_analyzer.py)",
                     "csv_file": "CSV file to process",
-                    "args": "Additional arguments (optional)"
+                    "args": "Additional arguments as string (optional)"
                 },
                 "example": {"script_name": "bar_chart_generator.py", "csv_file": "sales_data.csv", "args": "Product Sales"}
             }
