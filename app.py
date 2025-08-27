@@ -8,6 +8,7 @@ import os
 import json
 from pathlib import Path
 import sys
+import re
 
 # Add current directory to Python path
 current_dir = Path(__file__).parent
@@ -15,6 +16,115 @@ sys.path.insert(0, str(current_dir))
 
 # Initialize Flask app
 app = Flask(__name__)
+
+def simple_query_parser(query, direct_client):
+    """Simple keyword-based query parser when Ollama is not available"""
+    query_lower = query.lower()
+    
+    # Get available data files
+    data_files = direct_client.list_data_files()
+    default_file = data_files[0] if data_files else None
+    
+    # Keyword mappings for tools
+    if any(word in query_lower for word in ['stats', 'statistics', 'summary', 'analyze', 'analysis', 'info', 'describe']):
+        if default_file:
+            return {
+                "tool": "get_data_stats",
+                "parameters": {"data_source": default_file},
+                "explanation": f"Getting comprehensive statistics for {default_file}"
+            }
+        else:
+            return {
+                "tool": None,
+                "parameters": {},
+                "explanation": "I'd love to analyze your data, but no CSV files are available. Please upload a CSV file first."
+            }
+    
+    elif any(word in query_lower for word in ['chart', 'graph', 'plot', 'visualize', 'visualization']):
+        if default_file:
+            # Try to detect chart type
+            chart_type = "bar"
+            if "line" in query_lower:
+                chart_type = "line"
+            elif "scatter" in query_lower:
+                chart_type = "scatter"
+            elif "pie" in query_lower:
+                chart_type = "pie"
+            
+            return {
+                "tool": "generate_chart",
+                "parameters": {
+                    "data_source": default_file,
+                    "chart_type": chart_type,
+                    "title": f"{chart_type.title()} Chart",
+                    "x_axis": "name",  # Default assumption
+                    "y_axis": "value"  # Default assumption
+                },
+                "explanation": f"Creating a {chart_type} chart from {default_file}"
+            }
+        else:
+            return {
+                "tool": None,
+                "parameters": {},
+                "explanation": "I'd love to create a chart, but no CSV files are available. Please upload a CSV file first."
+            }
+    
+    elif any(word in query_lower for word in ['read', 'show', 'display', 'content', 'data']):
+        if default_file:
+            return {
+                "tool": "read_csv",
+                "parameters": {"filename": default_file},
+                "explanation": f"Reading and displaying the contents of {default_file}"
+            }
+        else:
+            return {
+                "tool": None,
+                "parameters": {},
+                "explanation": "I'd love to show your data, but no CSV files are available. Please upload a CSV file first."
+            }
+    
+    elif any(word in query_lower for word in ['filter', 'search', 'find', 'where']):
+        if default_file:
+            return {
+                "tool": None,
+                "parameters": {},
+                "explanation": "I can help filter your data! Please specify what column and value you want to filter by. For example: 'filter data where age > 25'"
+            }
+        else:
+            return {
+                "tool": None,
+                "parameters": {},
+                "explanation": "I'd love to filter your data, but no CSV files are available. Please upload a CSV file first."
+            }
+    
+    elif any(word in query_lower for word in ['column', 'columns', 'field', 'fields']):
+        if default_file:
+            return {
+                "tool": "get_column_info",
+                "parameters": {"data_source": default_file},
+                "explanation": f"Getting detailed information about columns in {default_file}"
+            }
+        else:
+            return {
+                "tool": None,
+                "parameters": {},
+                "explanation": "I'd love to show column information, but no CSV files are available. Please upload a CSV file first."
+            }
+    
+    else:
+        # Generic help response
+        if data_files:
+            return {
+                "tool": None,
+                "parameters": {},
+                "explanation": f"I can help you analyze your data! Available files: {', '.join(data_files)}. Try asking me to 'analyze data', 'create a chart', 'show columns', or 'read data'."
+            }
+        else:
+            return {
+                "tool": None,
+                "parameters": {},
+                "explanation": "Hi! I'm your data analysis assistant. I can help analyze CSV files, create charts, and provide statistics. Please upload a CSV file to get started, then ask me questions like 'analyze my data' or 'create a chart'."
+            }
 
 # Ensure required directories exist
 os.makedirs("data", exist_ok=True)
@@ -50,34 +160,71 @@ def chat():
             return jsonify({'error': 'Message is required'}), 400
         
         # Initialize clients
-        ollama_client = OllamaClient(model="llama3.2")
         direct_client = DirectClient()
         
-        # Process query with Ollama
-        response = ollama_client.process_query(user_query)
-        
-        if response and response.get("tool"):
-            # Execute the suggested tool
-            tool_result = direct_client.execute_tool(
-                response["tool"], 
-                response["parameters"]
-            )
+        # Try to connect to Ollama, but fall back to simple parsing if it fails
+        try:
+            # Check if we have an external Ollama URL in environment
+            import os
+            ollama_url = os.getenv('OLLAMA_URL', 'http://localhost:11434')
+            ollama_client = OllamaClient(model="llama3.2", base_url=ollama_url)
             
-            return jsonify({
-                'success': True,
-                'ai_response': response['explanation'],
-                'tool_used': response['tool'],
-                'tool_parameters': response['parameters'],
-                'tool_result': tool_result
-            })
-        else:
-            # Just return AI explanation
-            return jsonify({
-                'success': True,
-                'ai_response': response['explanation'] if response else "I couldn't process your request.",
-                'tool_used': None,
-                'tool_result': None
-            })
+            # Test connection first
+            import requests
+            test_response = requests.get(f"{ollama_url}/api/tags", timeout=3)
+            if test_response.status_code != 200:
+                raise ConnectionError("Ollama not accessible")
+            
+            # Process query with Ollama
+            response = ollama_client.process_query(user_query)
+            
+            if response and response.get("tool"):
+                # Execute the suggested tool
+                tool_result = direct_client.execute_tool(
+                    response["tool"], 
+                    response["parameters"]
+                )
+                
+                return jsonify({
+                    'success': True,
+                    'ai_response': response['explanation'],
+                    'tool_used': response['tool'],
+                    'tool_parameters': response['parameters'],
+                    'tool_result': tool_result
+                })
+            else:
+                # Just return AI explanation
+                return jsonify({
+                    'success': True,
+                    'ai_response': response['explanation'] if response else "I couldn't process your request.",
+                    'tool_used': None,
+                    'tool_result': None
+                })
+                
+        except (ConnectionError, requests.exceptions.RequestException, requests.exceptions.Timeout):
+            # Fallback: Simple keyword-based tool selection
+            response = simple_query_parser(user_query, direct_client)
+            
+            if response.get("tool"):
+                tool_result = direct_client.execute_tool(
+                    response["tool"], 
+                    response["parameters"]
+                )
+                
+                return jsonify({
+                    'success': True,
+                    'ai_response': response['explanation'],
+                    'tool_used': response['tool'],
+                    'tool_parameters': response['parameters'],
+                    'tool_result': tool_result
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'ai_response': response['explanation'],
+                    'tool_used': None,
+                    'tool_result': None
+                })
         
     except Exception as e:
         return jsonify({
