@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP Data Analysis Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col-md-12">
+                <h1 class="mt-4 mb-4">
+                    <i class="fas fa-chart-bar"></i> MCP Data Analysis Dashboard
+                </h1>
+                
+                <!-- File Upload Section -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5><i class="fas fa-upload"></i> Upload Data File</h5>
+                    </div>
+                    <div class="card-body">
+                        <input type="file" id="fileInput" accept=".csv" class="form-control mb-2">
+                        <button onclick="uploadFile()" class="btn btn-primary">
+                            <i class="fas fa-upload"></i> Upload CSV
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Available Files -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5><i class="fas fa-database"></i> Available Data Files</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if data_files %}
+                            <div class="list-group">
+                                {% for file in data_files %}
+                                <div class="list-group-item">
+                                    <i class="fas fa-file-csv"></i> {{ file }}
+                                    <button onclick="analyzeFile('{{ file }}')" class="btn btn-sm btn-outline-primary float-end">
+                                        <i class="fas fa-chart-line"></i> Analyze
+                                    </button>
+                                </div>
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            <p class="text-muted">No CSV files found. Upload a file to get started.</p>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <!-- Tool Execution -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5><i class="fas fa-tools"></i> Data Analysis Tools</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <label class="form-label">Tool:</label>
+                                <select id="toolSelect" class="form-select">
+                                    <option value="">Select a tool...</option>
+                                    {% for tool, desc in tools.items() %}
+                                    <option value="{{ tool }}">{{ tool }} - {{ desc }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Data File:</label>
+                                <select id="dataFileSelect" class="form-select">
+                                    <option value="">Select a file...</option>
+                                    {% for file in data_files %}
+                                    <option value="{{ file }}">{{ file }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <label class="form-label">Additional Parameters (JSON):</label>
+                            <textarea id="paramsInput" class="form-control" rows="3" placeholder='{"chart_type": "bar", "title": "My Chart"}'></textarea>
+                        </div>
+                        
+                        <div class="mt-3">
+                            <button onclick="executeTool()" class="btn btn-success">
+                                <i class="fas fa-play"></i> Execute Tool
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Results -->
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-chart-bar"></i> Results</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="results" class="text-muted">
+                            No results yet. Execute a tool to see output.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select a file');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            fetch('/api/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('File uploaded successfully!');
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                alert('Error uploading file: ' + error);
+            });
+        }
+        
+        function analyzeFile(filename) {
+            const params = {
+                tool: 'get_data_stats',
+                parameters: {
+                    data_source: filename
+                }
+            };
+            
+            executeToolInternal(params);
+        }
+        
+        function executeTool() {
+            const tool = document.getElementById('toolSelect').value;
+            const dataFile = document.getElementById('dataFileSelect').value;
+            const paramsText = document.getElementById('paramsInput').value;
+            
+            if (!tool) {
+                alert('Please select a tool');
+                return;
+            }
+            
+            let parameters = {};
+            if (dataFile) {
+                parameters.data_source = dataFile;
+            }
+            
+            if (paramsText) {
+                try {
+                    const additionalParams = JSON.parse(paramsText);
+                    parameters = {...parameters, ...additionalParams};
+                } catch (e) {
+                    alert('Invalid JSON in parameters');
+                    return;
+                }
+            }
+            
+            const params = {
+                tool: tool,
+                parameters: parameters
+            };
+            
+            executeToolInternal(params);
+        }
+        
+        function executeToolInternal(params) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Executing...';
+            
+            fetch('/api/execute', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(params)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    resultsDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            <strong>Tool:</strong> ${data.tool}<br>
+                            <strong>Parameters:</strong> ${JSON.stringify(data.parameters, null, 2)}
+                        </div>
+                        <pre>${data.result}</pre>
+                    `;
+                } else {
+                    resultsDiv.innerHTML = `
+                        <div class="alert alert-danger">
+                            <strong>Error:</strong> ${data.error}
+                        </div>
+                    `;
+                }
+            })
+            .catch(error => {
+                resultsDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <strong>Network Error:</strong> ${error}
+                    </div>
+                `;
+            });
+        }
+    </script>
+</body>
+</html>
