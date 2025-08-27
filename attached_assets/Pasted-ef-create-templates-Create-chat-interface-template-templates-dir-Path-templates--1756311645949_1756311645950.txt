@@ -1,4 +1,10 @@
-<!DOCTYPE html>
+ef create_templates():
+    """Create chat interface template"""
+    templates_dir = Path("templates")
+    templates_dir.mkdir(exist_ok=True)
+    
+    # Create chat.html
+    chat_html = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -287,4 +293,7 @@
         });
     </script>
 </body>
-</html>
+</html>"""
+    
+    with open(templates_dir / "chat.html", "w") as f:
+        f.write(chat_html)
