@@ -28,19 +28,25 @@ os.makedirs("static", exist_ok=True)
 def index():
     """AI Chat Interface"""
     try:
-        from client.direct_client import DirectClient
-        client = DirectClient()
+        from server.server import mcp
         
-        # Get available data files for context
-        data_files = client.list_data_files()
+        # Get available data files
+        data_files = []
+        if os.path.exists("data"):
+            data_files = [f for f in os.listdir("data") if f.endswith('.csv')]
         
-        # Get available tools and resources for the UI
-        tools = client.list_tools()
-        resources = client.list_resources() if hasattr(client, 'list_resources') else {}
+        # Get available tools from MCP server
+        tools = {
+            "read_csv": "Read CSV file content from data directory",
+            "get_data_stats": "Get comprehensive statistics about CSV data",
+            "get_column_info": "Get detailed information about columns in dataset",
+            "filter_data": "Filter CSV data by column value with various operations",
+            "generate_chart": "Generate charts from CSV data (bar, line, scatter, pie)",
+            "list_data_files": "List all available CSV files in the data directory",
+            "execute_script": "Execute analysis scripts"
+        }
         
-        print(f"DEBUG: data_files = {data_files}")
-        print(f"DEBUG: tools = {tools}")
-        print(f"DEBUG: resources = {resources}")
+        resources = {"csv://{filename}": "Access CSV file content as a resource"}
         
         import time
         timestamp = int(time.time())
@@ -57,8 +63,7 @@ def index():
 def chat():
     """Process natural language chat queries"""
     try:
-        from client.ollama_client import OllamaClient
-        from client.direct_client import DirectClient
+        from server.server import read_csv, get_data_stats, generate_chart, list_data_files, get_column_info, filter_data
         
         data = request.get_json()
         user_query = data.get('message', '')
@@ -66,149 +71,97 @@ def chat():
         if not user_query:
             return jsonify({'error': 'Message is required'}), 400
         
-        # Initialize clients
-        direct_client = DirectClient()
-        
-        # Parse user query for direct tool requests or natural language
         tool_result = None
         tool_used = None
         tool_parameters = None
         ai_response = ""
         
-        # Check if it's a direct tool request pattern
-        if user_query.startswith('#'):
-            # Handle # syntax: #tool_name params
-            parts = user_query[1:].split(' ', 1)
-            tool_name = parts[0]
-            tool_params_str = parts[1] if len(parts) > 1 else ""
+        # Parse user query for tool requests
+        query_lower = user_query.lower()
+        
+        if "read" in query_lower and "csv" in query_lower:
+            # Extract filename from query
+            words = user_query.split()
+            csv_file = None
+            for word in words:
+                if word.endswith('.csv'):
+                    csv_file = word
+                    break
             
-            # Parse parameters
+            if not csv_file:
+                # Check for common file patterns
+                for filename in ["employee_data.csv", "sales_data.csv", "sample_data.csv", "inventory_data.csv"]:
+                    if filename.replace("_", " ").replace(".csv", "") in query_lower:
+                        csv_file = filename
+                        break
+            
+            if csv_file:
+                tool_parameters = {"filename": csv_file}
+                tool_result = read_csv(csv_file)
+                tool_used = "read_csv"
+                ai_response = f"Reading {csv_file} from the data directory."
+            else:
+                ai_response = "Please specify a CSV filename. Available files can be found in the data directory."
+        
+        elif "chart" in query_lower or "visualiz" in query_lower or "graph" in query_lower:
+            # Handle chart generation
+            chart_type = "bar"
+            if "pie" in query_lower:
+                chart_type = "pie"
+            elif "line" in query_lower:
+                chart_type = "line"
+            elif "scatter" in query_lower:
+                chart_type = "scatter"
+            
+            # Extract CSV file
+            csv_file = "sample_data.csv"
+            words = user_query.split()
+            for word in words:
+                if word.endswith('.csv'):
+                    csv_file = word
+                    break
+            
             try:
-                import json
-                tool_parameters = json.loads(tool_params_str) if tool_params_str.startswith('{') else {"filename": tool_params_str}
-            except:
-                tool_parameters = {"filename": tool_params_str} if tool_params_str else {}
-            
-            tool_result = direct_client.execute_tool(tool_name, tool_parameters)
-            tool_used = tool_name
-            ai_response = f"Executed {tool_name} with parameters: {tool_parameters}"
-            
-        else:
-            # Parse natural language queries for common patterns
-            query_lower = user_query.lower()
-            
-            if "read" in query_lower and ("csv" in query_lower or any(f in query_lower for f in ["employee", "sales", "sample", "inventory"])):
-                # Extract filename
-                for filename in ["employee_data.csv", "sales_data.csv", "sample_data.csv", "inventory_data.csv"]:
-                    if filename.replace("_", " ").replace(".csv", "") in query_lower or filename in query_lower:
-                        tool_parameters = {"filename": filename}
-                        tool_result = direct_client.execute_tool("read_csv", tool_parameters)
-                        tool_used = "read_csv"
-                        ai_response = f"Reading the CSV file containing {filename.replace('.csv', '').replace('_', ' ')} from the 'data' directory."
-                        break
-                else:
-                    # Try to extract any CSV filename
-                    words = user_query.split()
-                    for word in words:
-                        if word.endswith('.csv'):
-                            tool_parameters = {"filename": word}
-                            tool_result = direct_client.execute_tool("read_csv", tool_parameters)
-                            tool_used = "read_csv"
-                            ai_response = f"Reading the CSV file {word} from the 'data' directory."
-                            break
-            
-            elif "chart" in query_lower or "visualiz" in query_lower or "graph" in query_lower:
-                # Handle chart generation requests
-                chart_type = "bar"
-                if "pie" in query_lower:
-                    chart_type = "pie"
-                elif "line" in query_lower:
-                    chart_type = "line"
-                elif "scatter" in query_lower:
-                    chart_type = "scatter"
-                
-                # Extract CSV file
-                csv_file = "sample_data.csv"  # default
-                for filename in ["employee_data.csv", "sales_data.csv", "sample_data.csv", "inventory_data.csv"]:
-                    if filename.replace("_", " ").replace(".csv", "") in query_lower or filename in query_lower:
-                        csv_file = filename
-                        break
-                
-                # Try to determine columns from CSV
                 import pandas as pd
-                try:
-                    df = pd.read_csv(f"data/{csv_file}")
-                    columns = list(df.columns)
-                    x_axis = columns[0] if len(columns) > 0 else "x"
-                    y_axis = columns[1] if len(columns) > 1 else columns[0]
-                    
-                    tool_parameters = {
-                        "data_source": csv_file,
-                        "chart_type": chart_type,
-                        "title": f"{chart_type.title()} Chart from {csv_file}",
-                        "x_axis": x_axis,
-                        "y_axis": y_axis
-                    }
-                    tool_result = direct_client.execute_tool("generate_chart", tool_parameters)
-                    tool_used = "generate_chart"
-                    ai_response = f"Creating a {chart_type} chart from {csv_file} using columns {x_axis} and {y_axis}."
-                except:
-                    ai_response = f"Please specify which CSV file to use for the chart. Available files: employee_data.csv, sales_data.csv, sample_data.csv, inventory_data.csv"
-            
-            elif "stats" in query_lower or "statistics" in query_lower or "analyze" in query_lower:
-                # Handle statistics requests
-                csv_file = "sample_data.csv"  # default
-                for filename in ["employee_data.csv", "sales_data.csv", "sample_data.csv", "inventory_data.csv"]:
-                    if filename.replace("_", " ").replace(".csv", "") in query_lower or filename in query_lower:
-                        csv_file = filename
-                        break
+                df = pd.read_csv(f"data/{csv_file}")
+                columns = list(df.columns)
+                x_axis = columns[0] if len(columns) > 0 else "x"
+                y_axis = columns[1] if len(columns) > 1 else columns[0]
                 
-                tool_parameters = {"data_source": csv_file}
-                tool_result = direct_client.execute_tool("get_data_stats", tool_parameters)
-                tool_used = "get_data_stats"
-                ai_response = f"Getting comprehensive statistics for {csv_file}."
+                tool_parameters = {
+                    "data_source": csv_file,
+                    "chart_type": chart_type,
+                    "title": f"{chart_type.title()} Chart from {csv_file}",
+                    "x_axis": x_axis,
+                    "y_axis": y_axis
+                }
+                tool_result = generate_chart(csv_file, chart_type, tool_parameters["title"], x_axis, y_axis)
+                tool_used = "generate_chart"
+                ai_response = f"Creating a {chart_type} chart from {csv_file}."
+            except Exception as e:
+                ai_response = f"Error creating chart: {str(e)}"
+        
+        elif "stats" in query_lower or "statistics" in query_lower or "analyze" in query_lower:
+            # Handle statistics requests
+            csv_file = "sample_data.csv"
+            words = user_query.split()
+            for word in words:
+                if word.endswith('.csv'):
+                    csv_file = word
+                    break
             
-            elif "list" in query_lower and "file" in query_lower:
-                # List available files
-                tool_result = direct_client.execute_tool("list_data_files", {})
-                tool_used = "list_data_files"
-                ai_response = "Listing all available CSV files in the data directory."
-            
-            elif "script" in query_lower and "execute" in query_lower:
-                # Handle script execution
-                script_name = "bar_chart_generator.py"  # default
-                if "pie" in query_lower:
-                    script_name = "pie_chart_generator.py"
-                elif "analyzer" in query_lower:
-                    script_name = "data_analyzer.py"
-                
-                csv_file = "sample_data.csv"  # default
-                for filename in ["employee_data.csv", "sales_data.csv", "sample_data.csv", "inventory_data.csv"]:
-                    if filename.replace("_", " ").replace(".csv", "") in query_lower or filename in query_lower:
-                        csv_file = filename
-                        break
-                
-                tool_parameters = {"script_name": script_name, "csv_file": csv_file}
-                tool_result = direct_client.execute_tool("execute_script", tool_parameters)
-                tool_used = "execute_script"
-                ai_response = f"Executing {script_name} with {csv_file}."
-            
-            # Try Ollama as fallback if no direct pattern matched
-            if not tool_used:
-                try:
-                    ollama_url = 'http://127.0.0.1:11434'
-                    ollama_client = OllamaClient(model="llama3.2:1b", base_url=ollama_url)
-                    response = ollama_client.process_query(user_query)
-                    
-                    if response and response.get("tool"):
-                        tool_result = direct_client.execute_tool(response["tool"], response["parameters"])
-                        tool_used = response["tool"]
-                        tool_parameters = response["parameters"]
-                        ai_response = response['explanation']
-                    else:
-                        ai_response = response['explanation'] if response else "I understand you want to work with data, but I need more specific instructions. Try: 'read sample_data.csv' or 'create a chart from sales_data.csv'"
-                except:
-                    ai_response = "I understand you want to work with data. Here are some things you can try:\n• 'read sample_data.csv' - to read a CSV file\n• 'create a bar chart from sales_data.csv' - to generate charts\n• 'get stats for employee_data.csv' - for data analysis\n• Click the gear button to see all available tools"
+            tool_parameters = {"data_source": csv_file}
+            tool_result = get_data_stats(csv_file)
+            tool_used = "get_data_stats"
+            ai_response = f"Getting statistics for {csv_file}."
+        
+        elif "list" in query_lower and "file" in query_lower:
+            tool_result = list_data_files()
+            tool_used = "list_data_files"
+            ai_response = "Listing all available CSV files in the data directory."
+        
+        else:
+            ai_response = "I can help you analyze CSV data. Try:\n• 'read filename.csv' - to view file contents\n• 'create a chart from filename.csv' - to generate visualizations\n• 'get stats for filename.csv' - for data analysis\n• 'list files' - to see available data files"
         
         return jsonify({
             'success': True,
@@ -260,12 +213,21 @@ def upload_file():
 def get_tools():
     """Get available tools and resources"""
     try:
-        from client.direct_client import DirectClient
-        client = DirectClient()
+        # Get available data files
+        data_files = []
+        if os.path.exists("data"):
+            data_files = [f for f in os.listdir("data") if f.endswith('.csv')]
         
-        tools = client.list_tools()
-        resources = client.list_resources() if hasattr(client, 'list_resources') else {}
-        data_files = client.list_data_files()
+        tools = {
+            "read_csv": "Read CSV file content from data directory",
+            "get_data_stats": "Get comprehensive statistics about CSV data",
+            "get_column_info": "Get detailed information about columns in dataset",
+            "filter_data": "Filter CSV data by column value with various operations",
+            "generate_chart": "Generate charts from CSV data (bar, line, scatter, pie)",
+            "list_data_files": "List all available CSV files in the data directory"
+        }
+        
+        resources = {"csv://{filename}": "Access CSV file content as a resource"}
         
         return jsonify({
             'success': True,

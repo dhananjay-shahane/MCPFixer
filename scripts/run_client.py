@@ -12,17 +12,12 @@ parent_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(parent_dir))
 
 def main():
-    """Run the client CLI interface"""
-    try:
-        from client.cli_interface import run_cli
-        run_cli()
-    except ImportError as e:
-        print(f"Error importing client: {e}")
-        print("Make sure all dependencies are installed")
-        return 1
-    except Exception as e:
-        print(f"Error running client: {e}")
-        return 1
+    """Client functionality has been integrated into the web interface"""
+    print("MCP Data Analysis Client")
+    print("The client functionality is now integrated into the web interface.")
+    print("Please use the web application at http://localhost:5000")
+    print("Run 'python app.py' to start the web server.")
+    return 0
 
 if __name__ == "__main__":
     exit(main())
