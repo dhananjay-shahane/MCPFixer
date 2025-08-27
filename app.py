@@ -87,7 +87,8 @@ def chat():
             try:
                 if hasattr(mcp, '_tool_manager') and tool_name in mcp._tool_manager._tools:
                     tool = mcp._tool_manager._tools[tool_name]
-                    tool_func = tool.func
+                    # Access the actual function from the tool object
+                    tool_func = tool.function if hasattr(tool, 'function') else getattr(tool, 'func', None)
                     
                     # Execute tool with parameters
                     if tool_name == "read_csv":
@@ -193,8 +194,10 @@ def chat():
             available_files = []
             try:
                 if hasattr(mcp, '_tool_manager') and 'list_data_files' in mcp._tool_manager._tools:
-                    tool_func = mcp._tool_manager._tools['list_data_files'].func
-                    file_list_result = tool_func()
+                    tool = mcp._tool_manager._tools['list_data_files']
+                    tool_func = tool.function if hasattr(tool, 'function') else getattr(tool, 'func', None)
+                    if tool_func:
+                        file_list_result = tool_func()
                     if file_list_result:
                         files_data = json.loads(file_list_result)
                         available_files = files_data.get('available_files', [])
@@ -219,8 +222,10 @@ def chat():
             # Tool selection based on query intent - using MCP server tools
             if any(word in query_lower for word in ['read', 'show', 'display', 'view', 'content']):
                 if detected_file and hasattr(mcp, '_tool_manager') and 'read_csv' in mcp._tool_manager._tools:
-                    tool_func = mcp._tool_manager._tools['read_csv'].func
-                    tool_result = tool_func(detected_file)
+                    tool = mcp._tool_manager._tools['read_csv']
+                    tool_func = tool.function if hasattr(tool, 'function') else getattr(tool, 'func', None)
+                    if tool_func:
+                        tool_result = tool_func(detected_file)
                     tool_used = "read_csv"
                     tool_parameters = {"filename": detected_file}
                     ai_response = f"Reading {detected_file} from the data directory."
@@ -238,8 +243,10 @@ def chat():
                     try:
                         # Use read_csv tool to get column information
                         if hasattr(mcp, '_tool_manager') and 'read_csv' in mcp._tool_manager._tools:
-                            read_func = mcp._tool_manager._tools['read_csv'].func
-                            csv_data = read_func(detected_file)
+                            tool = mcp._tool_manager._tools['read_csv']
+                            read_func = tool.function if hasattr(tool, 'function') else getattr(tool, 'func', None)
+                            if read_func:
+                                csv_data = read_func(detected_file)
                             # Parse first line to get columns
                             lines = csv_data.split('\n')
                             if lines:
@@ -253,8 +260,10 @@ def chat():
                             x_axis = 'x'
                             y_axis = 'y'
                         
-                        chart_func = mcp._tool_manager._tools['generate_chart'].func
-                        tool_result = chart_func(detected_file, chart_type, f"{chart_type.title()} Chart", x_axis, y_axis)
+                        tool = mcp._tool_manager._tools['generate_chart']
+                        chart_func = tool.function if hasattr(tool, 'function') else getattr(tool, 'func', None)
+                        if chart_func:
+                            tool_result = chart_func(detected_file, chart_type, f"{chart_type.title()} Chart", x_axis, y_axis)
                         tool_used = "generate_chart"
                         tool_parameters = {"data_source": detected_file, "chart_type": chart_type, "x_axis": x_axis, "y_axis": y_axis}
                         ai_response = f"Creating a {chart_type} chart from {detected_file}."
@@ -265,8 +274,10 @@ def chat():
                     
             elif any(word in query_lower for word in ['stats', 'statistics', 'analyze', 'summary']):
                 if detected_file and hasattr(mcp, '_tool_manager') and 'get_data_stats' in mcp._tool_manager._tools:
-                    tool_func = mcp._tool_manager._tools['get_data_stats'].func
-                    tool_result = tool_func(detected_file)
+                    tool = mcp._tool_manager._tools['get_data_stats']
+                    tool_func = tool.function if hasattr(tool, 'function') else getattr(tool, 'func', None)
+                    if tool_func:
+                        tool_result = tool_func(detected_file)
                     tool_used = "get_data_stats"
                     tool_parameters = {"data_source": detected_file}
                     ai_response = f"Getting comprehensive statistics for {detected_file}."
@@ -275,8 +286,10 @@ def chat():
                     
             elif any(word in query_lower for word in ['column', 'field', 'info']):
                 if detected_file and hasattr(mcp, '_tool_manager') and 'get_column_info' in mcp._tool_manager._tools:
-                    tool_func = mcp._tool_manager._tools['get_column_info'].func
-                    tool_result = tool_func(detected_file)
+                    tool = mcp._tool_manager._tools['get_column_info']
+                    tool_func = tool.function if hasattr(tool, 'function') else getattr(tool, 'func', None)
+                    if tool_func:
+                        tool_result = tool_func(detected_file)
                     tool_used = "get_column_info"
                     tool_parameters = {"data_source": detected_file}
                     ai_response = f"Getting column information for {detected_file}."
@@ -285,8 +298,10 @@ def chat():
                     
             elif any(word in query_lower for word in ['list', 'files', 'available']):
                 if hasattr(mcp, '_tool_manager') and 'list_data_files' in mcp._tool_manager._tools:
-                    tool_func = mcp._tool_manager._tools['list_data_files'].func
-                    tool_result = tool_func()
+                    tool = mcp._tool_manager._tools['list_data_files']
+                    tool_func = tool.function if hasattr(tool, 'function') else getattr(tool, 'func', None)
+                    if tool_func:
+                        tool_result = tool_func()
                     tool_used = "list_data_files"
                     tool_parameters = {}
                     ai_response = "Here are all available CSV files in the data directory."
@@ -296,8 +311,10 @@ def chat():
             else:
                 # Default: show available files and capabilities
                 if hasattr(mcp, '_tool_manager') and 'list_data_files' in mcp._tool_manager._tools:
-                    tool_func = mcp._tool_manager._tools['list_data_files'].func
-                    tool_result = tool_func()
+                    tool = mcp._tool_manager._tools['list_data_files']
+                    tool_func = tool.function if hasattr(tool, 'function') else getattr(tool, 'func', None)
+                    if tool_func:
+                        tool_result = tool_func()
                     tool_used = "list_data_files"
                     tool_parameters = {}
                     ai_response = f"I can help you analyze CSV data. Available files: {', '.join(available_files)}. Try asking to 'read', 'chart', or 'analyze' a specific file."
