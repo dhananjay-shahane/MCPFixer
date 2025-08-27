@@ -129,9 +129,140 @@
             bottom: 10px;
             text-align: center;
         }
+        .tools-button {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            transition: all 0.3s ease;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .tools-button:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+        }
+        .tools-sidebar {
+            position: fixed;
+            top: 0;
+            right: -400px;
+            width: 400px;
+            height: 100vh;
+            background: white;
+            box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+            transition: right 0.3s ease;
+            z-index: 999;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        .tools-sidebar.open {
+            right: 0;
+        }
+        .tools-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #eee;
+        }
+        .close-sidebar {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+        }
+        .tool-item {
+            margin-bottom: 15px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        .tool-name {
+            font-weight: bold;
+            color: #4CAF50;
+            margin-bottom: 5px;
+        }
+        .tool-description {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+        .use-tool-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        .use-tool-btn:hover {
+            background: #45a049;
+        }
+        .resources-section {
+            margin-top: 30px;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #333;
+        }
     </style>
 </head>
 <body>
+    <!-- Tools Button -->
+    <button class="tools-button" onclick="toggleToolsSidebar()">
+        <i class="fas fa-cog"></i> Show Tools & Resources
+    </button>
+
+    <!-- Tools Sidebar -->
+    <div class="tools-sidebar" id="toolsSidebar">
+        <div class="tools-header">
+            <h3><i class="fas fa-tools"></i> Tools & Resources</h3>
+            <button class="close-sidebar" onclick="toggleToolsSidebar()">×</button>
+        </div>
+        
+        <div class="section-title"><i class="fas fa-tools"></i> Available Tools</div>
+        {% if tools %}
+            {% for tool_name, tool_desc in tools.items() %}
+            <div class="tool-item">
+                <div class="tool-name">{{ tool_name }}</div>
+                <div class="tool-description">{{ tool_desc }}</div>
+                <button class="use-tool-btn" onclick="useTool('{{ tool_name }}')">Use Tool</button>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p class="text-muted">No tools available</p>
+        {% endif %}
+
+        {% if resources %}
+        <div class="resources-section">
+            <div class="section-title"><i class="fas fa-database"></i> Resources</div>
+            {% for resource_name, resource_desc in resources.items() %}
+            <div class="tool-item">
+                <div class="tool-name">{{ resource_name }}</div>
+                <div class="tool-description">{{ resource_desc }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
     <div class="chat-container">
         <div class="chat-header">
             <h2><i class="fas fa-robot"></i> AI Data Analysis Assistant</h2>
@@ -284,6 +415,57 @@
         // Focus on input when page loads
         document.addEventListener('DOMContentLoaded', function() {
             document.getElementById('messageInput').focus();
+        });
+
+        // Tools sidebar functionality
+        function toggleToolsSidebar() {
+            const sidebar = document.getElementById('toolsSidebar');
+            sidebar.classList.toggle('open');
+        }
+
+        function useTool(toolName) {
+            const input = document.getElementById('messageInput');
+            
+            // Pre-fill the input with a tool suggestion
+            switch(toolName) {
+                case 'read_csv':
+                    input.value = 'read sample_data.csv';
+                    break;
+                case 'get_data_stats':
+                    input.value = 'get statistics for sample_data.csv';
+                    break;
+                case 'generate_chart':
+                    input.value = 'create a bar chart from sample_data.csv';
+                    break;
+                case 'list_data_files':
+                    input.value = 'list all data files';
+                    break;
+                case 'filter_data':
+                    input.value = 'filter sample_data.csv where column_name = value';
+                    break;
+                case 'get_column_info':
+                    input.value = 'get column information for sample_data.csv';
+                    break;
+                case 'execute_script':
+                    input.value = 'execute data_analyzer.py script';
+                    break;
+                default:
+                    input.value = `Use ${toolName} tool`;
+            }
+            
+            // Close sidebar and focus input
+            toggleToolsSidebar();
+            input.focus();
+        }
+
+        // Close sidebar when clicking outside
+        document.addEventListener('click', function(event) {
+            const sidebar = document.getElementById('toolsSidebar');
+            const toolsButton = document.querySelector('.tools-button');
+            
+            if (!sidebar.contains(event.target) && !toolsButton.contains(event.target)) {
+                sidebar.classList.remove('open');
+            }
         });
     </script>
 </body>
