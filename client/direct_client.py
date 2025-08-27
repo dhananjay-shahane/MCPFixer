@@ -1,48 +1,255 @@
-import sys
 import os
+import sys
+from typing import Dict, Any
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime
 import json
-from typing import Dict, Any, Optional
-
-# Add the parent directory to the path for imports
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import numpy as np
+import subprocess
 
 class DirectClient:
-    """Direct client for executing MCP server tools without going through the MCP protocol"""
+    """Direct client that executes MCP tools without the protocol overhead"""
     
     def __init__(self):
-        # Import server module and access the raw functions
+        """Initialize the client with available tools"""
+        self.available_tools = {}
+        self._setup_tools()
+    
+    def _setup_tools(self):
+        """Set up the available tools by defining them directly"""
         try:
-            import sys
-            import os
-            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            # Create output directory if it doesn't exist
+            os.makedirs("output", exist_ok=True)
+            os.makedirs("data", exist_ok=True)
             
-            # Import the server to access the actual tool functions
-            from server.server import mcp
+            # Define tool functions directly to avoid MCP wrapper issues
+            def read_csv(filename: str):
+                try:
+                    filepath = f"data/{filename}"
+                    if os.path.exists(filepath):
+                        df = pd.read_csv(filepath)
+                        return df.to_string(index=False)
+                    else:
+                        return f"File {filename} not found in data directory"
+                except Exception as e:
+                    return f"Error reading CSV file: {str(e)}"
             
-            # Extract the actual functions from the MCP tools
-            self.available_tools = {}
-            self.mcp_server = mcp
+            def get_data_stats(data_source: str):
+                try:
+                    filepath = f'data/{data_source}'
+                    if not os.path.exists(filepath):
+                        return f"Data file {data_source} not found in data directory"
+                    
+                    df = pd.read_csv(filepath)
+                    stats = {
+                        "file_info": {
+                            "filename": data_source,
+                            "shape": df.shape,
+                            "size_mb": round(os.path.getsize(filepath) / (1024*1024), 4)
+                        },
+                        "columns": list(df.columns),
+                        "data_types": df.dtypes.astype(str).to_dict(),
+                        "null_counts": df.isnull().sum().to_dict(),
+                        "null_percentages": (df.isnull().sum() / len(df) * 100).round(2).to_dict(),
+                    }
+                    
+                    numeric_cols = df.select_dtypes(include=[np.number]).columns
+                    if len(numeric_cols) > 0:
+                        stats["numeric_statistics"] = df[numeric_cols].describe().to_dict()
+                    
+                    categorical_cols = df.select_dtypes(include=['object']).columns
+                    categorical_stats = {}
+                    for col in categorical_cols:
+                        if df[col].nunique() <= 20:
+                            categorical_stats[col] = df[col].value_counts().to_dict()
+                    
+                    if categorical_stats:
+                        stats["categorical_statistics"] = categorical_stats
+                    
+                    return json.dumps(stats, indent=2, default=str)
+                except Exception as e:
+                    return f"Error getting stats: {str(e)}"
             
-            # Import individual functions directly since MCP tool decorator wrapping causes issues
-            from server.server import (
-                read_csv as _read_csv,
-                generate_chart as _generate_chart,
-                get_data_stats as _get_data_stats,
-                filter_data as _filter_data,
-                get_column_info as _get_column_info,
-                list_data_files as _list_data_files,
-                execute_script as _execute_script
-            )
+            def generate_chart(data_source: str, chart_type: str = 'bar', title: str = 'Chart', x_axis: str = 'x', y_axis: str = 'y'):
+                try:
+                    filepath = f'data/{data_source}'
+                    if not os.path.exists(filepath):
+                        return f"Data file {data_source} not found in data directory"
+                        
+                    df = pd.read_csv(filepath)
+                    
+                    if x_axis not in df.columns:
+                        return f"Column '{x_axis}' not found in data. Available columns: {list(df.columns)}"
+                    
+                    if y_axis not in df.columns and chart_type != 'pie':
+                        return f"Column '{y_axis}' not found in data. Available columns: {list(df.columns)}"
+                    
+                    plt.figure(figsize=(12, 8))
+                    
+                    if chart_type == 'bar':
+                        plt.bar(df[x_axis], df[y_axis])
+                        plt.xlabel(x_axis)
+                        plt.ylabel(y_axis)
+                    elif chart_type == 'line':
+                        plt.plot(df[x_axis], df[y_axis], marker='o')
+                        plt.xlabel(x_axis)
+                        plt.ylabel(y_axis)
+                    elif chart_type == 'scatter':
+                        plt.scatter(df[x_axis], df[y_axis])
+                        plt.xlabel(x_axis)
+                        plt.ylabel(y_axis)
+                    elif chart_type == 'pie':
+                        grouped_data = df.groupby(x_axis)[y_axis].sum() if y_axis in df.columns else df[x_axis].value_counts()
+                        plt.pie(grouped_data.values, labels=grouped_data.index, autopct='%1.1f%%')
+                    else:
+                        return f"Unsupported chart type: {chart_type}. Supported types: bar, line, scatter, pie"
+                    
+                    plt.title(title)
+                    plt.xticks(rotation=45)
+                    plt.tight_layout()
+                    
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"output/chart_{chart_type}_{timestamp}.png"
+                    plt.savefig(filename, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    
+                    return f"Chart saved as {filename}"
+                except Exception as e:
+                    return f"Error generating chart: {str(e)}"
             
-            # Map tool names to raw functions (bypassing MCP decorators)
+            def filter_data(data_source: str, column: str, value: str, operation: str = "equals"):
+                try:
+                    filepath = f'data/{data_source}'
+                    if not os.path.exists(filepath):
+                        return f"Data file {data_source} not found in data directory"
+                        
+                    df = pd.read_csv(filepath)
+                    
+                    if column not in df.columns:
+                        return f"Column '{column}' not found in data. Available columns: {list(df.columns)}"
+                    
+                    # Apply filtering based on operation
+                    if operation == "equals":
+                        filtered = df[df[column] == value]
+                    elif operation == "contains":
+                        filtered = df[df[column].astype(str).str.contains(str(value), case=False, na=False)]
+                    elif operation == "greater":
+                        try:
+                            filtered = df[pd.to_numeric(df[column], errors='coerce') > float(value)]
+                        except ValueError:
+                            return f"Cannot perform 'greater' operation on non-numeric data in column '{column}'"
+                    elif operation == "less":
+                        try:
+                            filtered = df[pd.to_numeric(df[column], errors='coerce') < float(value)]
+                        except ValueError:
+                            return f"Cannot perform 'less' operation on non-numeric data in column '{column}'"
+                    elif operation == "not_equals":
+                        filtered = df[df[column] != value]
+                    else:
+                        return f"Unsupported operation: {operation}. Supported: equals, contains, greater, less, not_equals"
+                    
+                    if len(filtered) == 0:
+                        return f"No rows found matching the filter criteria"
+                    
+                    result = {
+                        "filtered_count": len(filtered),
+                        "total_count": len(df),
+                        "percentage": round(len(filtered) / len(df) * 100, 2),
+                        "data": filtered.head(100).to_string(index=False)
+                    }
+                    
+                    return json.dumps(result, indent=2)
+                except Exception as e:
+                    return f"Error filtering data: {str(e)}"
+            
+            def get_column_info(data_source: str, column: str = None):
+                try:
+                    filepath = f'data/{data_source}'
+                    if not os.path.exists(filepath):
+                        return f"Data file {data_source} not found in data directory"
+                        
+                    df = pd.read_csv(filepath)
+                    
+                    if column and column not in df.columns:
+                        return f"Column '{column}' not found in data. Available columns: {list(df.columns)}"
+                    
+                    columns_to_analyze = [column] if column else df.columns
+                    column_info = {}
+                    
+                    for col in columns_to_analyze:
+                        info = {
+                            "data_type": str(df[col].dtype),
+                            "null_count": int(df[col].isnull().sum()),
+                            "null_percentage": round(df[col].isnull().sum() / len(df) * 100, 2),
+                            "unique_values": int(df[col].nunique()),
+                            "memory_usage": int(df[col].memory_usage(deep=True))
+                        }
+                        
+                        if pd.api.types.is_numeric_dtype(df[col]):
+                            info.update({
+                                "min": float(df[col].min()) if not df[col].isnull().all() else None,
+                                "max": float(df[col].max()) if not df[col].isnull().all() else None,
+                                "mean": float(df[col].mean()) if not df[col].isnull().all() else None,
+                                "median": float(df[col].median()) if not df[col].isnull().all() else None,
+                                "std": float(df[col].std()) if not df[col].isnull().all() else None
+                            })
+                        else:
+                            if df[col].nunique() <= 10:
+                                info["top_values"] = df[col].value_counts().head(10).to_dict()
+                            else:
+                                info["sample_values"] = df[col].dropna().head(5).tolist()
+                        
+                        column_info[col] = info
+                    
+                    return json.dumps(column_info, indent=2, default=str)
+                except Exception as e:
+                    return f"Error getting column info: {str(e)}"
+            
+            def list_data_files():
+                try:
+                    data_dir = "data"
+                    if not os.path.exists(data_dir):
+                        return "Data directory not found"
+                    
+                    csv_files = [f for f in os.listdir(data_dir) if f.endswith('.csv')]
+                    return json.dumps({"available_files": csv_files}, indent=2)
+                except Exception as e:
+                    return f"Error listing files: {str(e)}"
+            
+            def execute_script(script_name: str, csv_file: str, args: str = ""):
+                try:
+                    script_path = f"scripts/{script_name}"
+                    if not os.path.exists(script_path):
+                        available_scripts = [f for f in os.listdir("scripts") if f.endswith('.py')]
+                        return f"Script {script_name} not found. Available scripts: {available_scripts}"
+                    
+                    csv_path = f"data/{csv_file}"
+                    if not os.path.exists(csv_path):
+                        return f"CSV file {csv_file} not found in data directory"
+                    
+                    cmd = [sys.executable, script_path, csv_path]
+                    if args:
+                        cmd.extend(args.split())
+                    
+                    result = subprocess.run(cmd, capture_output=True, text=True, cwd=".")
+                    
+                    if result.returncode == 0:
+                        return f"Script executed successfully:\n{result.stdout}"
+                    else:
+                        return f"Script execution failed:\n{result.stderr}"
+                except Exception as e:
+                    return f"Error executing script: {str(e)}"
+            
+            # Map tool names to functions
             self.available_tools = {
-                "read_csv": _read_csv,
-                "generate_chart": _generate_chart,
-                "get_data_stats": _get_data_stats,
-                "filter_data": _filter_data,
-                "get_column_info": _get_column_info,
-                "list_data_files": _list_data_files,
-                "execute_script": _execute_script
+                "read_csv": read_csv,
+                "generate_chart": generate_chart,
+                "get_data_stats": get_data_stats,
+                "filter_data": filter_data,
+                "get_column_info": get_column_info,
+                "list_data_files": list_data_files,
+                "execute_script": execute_script
             }
                     
         except Exception as e:
@@ -67,7 +274,7 @@ class DirectClient:
             "csv://{filename}": "Access CSV file content as a resource"
         }
     
-    def get_tool_info(self, tool_name: str) -> Optional[Dict[str, Any]]:
+    def get_tool_info(self, tool_name: str) -> Dict[str, Any]:
         """Get detailed information about a specific tool"""
         tool_info = {
             "read_csv": {
@@ -194,78 +401,61 @@ def main():
     
     while True:
         try:
-            user_input = input("direct> ").strip()
+            user_input = input("direct_client> ").strip().split()
             if not user_input:
                 continue
                 
-            parts = user_input.split(None, 1)
-            command = parts[0].lower()
+            command = user_input[0].lower()
             
-            if command in ['quit', 'exit', 'q']:
-                print("Goodbye!")
+            if command == "quit":
                 break
-            elif command == 'help':
-                print("Commands:")
-                print("  tools - List available tools")
-                print("  info <tool_name> - Get detailed tool information")
-                print("  files - List CSV files in data directory")
-                print("  exec <tool_name> <params_json> - Execute tool with JSON parameters")
-                print("  quit - Exit")
-            elif command == 'tools':
+            elif command == "tools":
                 tools = client.list_tools()
                 for name, desc in tools.items():
                     print(f"  {name}: {desc}")
-            elif command == 'files':
-                data_files = client.list_data_files()
-                if data_files:
-                    print(f"CSV files in data directory: {', '.join(data_files)}")
+            elif command == "files":
+                files = client.list_data_files()
+                if files:
+                    print("Available CSV files:")
+                    for file in files:
+                        print(f"  - {file}")
                 else:
-                    print("No CSV files found in data directory")
-            elif command == 'info':
-                if len(parts) < 2:
-                    print("Usage: info <tool_name>")
-                    continue
-                tool_name = parts[1]
+                    print("No CSV files found")
+            elif command == "info" and len(user_input) > 1:
+                tool_name = user_input[1]
                 info = client.get_tool_info(tool_name)
                 if info:
                     print(f"Tool: {tool_name}")
                     print(f"Description: {info['description']}")
-                    print("Parameters:")
-                    for param, desc in info['parameters'].items():
-                        print(f"  {param}: {desc}")
-                    print(f"Example: {json.dumps(info['example'], indent=2)}")
+                    print(f"Parameters: {info['parameters']}")
+                    print(f"Example: {info['example']}")
                 else:
                     print(f"Tool '{tool_name}' not found")
-            elif command == 'exec':
-                if len(parts) < 2:
-                    print("Usage: exec <tool_name> <params_json>")
-                    print("Example: exec get_data_stats {\"data_source\": \"sample_data.csv\"}")
-                    continue
-                
-                exec_parts = parts[1].split(None, 1)
-                if len(exec_parts) < 2:
-                    print("Usage: exec <tool_name> <params_json>")
-                    continue
-                
-                tool_name = exec_parts[0]
+            elif command == "exec" and len(user_input) > 2:
+                tool_name = user_input[1]
                 try:
-                    params = json.loads(exec_parts[1])
-                except json.JSONDecodeError as e:
-                    print(f"Invalid JSON parameters: {e}")
-                    continue
-                
-                print(f"Executing {tool_name}...")
-                result = client.execute_tool(tool_name, params)
-                print("Result:")
-                print(result)
+                    params = json.loads(' '.join(user_input[2:]))
+                    result = client.execute_tool(tool_name, params)
+                    print(result)
+                except json.JSONDecodeError:
+                    print("Invalid JSON parameters")
+            elif command == "help":
+                print("Available commands:")
+                print("  tools - List available tools")
+                print("  info <tool_name> - Get tool information") 
+                print("  files - List data files")
+                print("  exec <tool_name> <params_json> - Execute tool")
+                print("  help - Show this help")
+                print("  quit - Exit")
             else:
                 print(f"Unknown command: {command}. Type 'help' for available commands.")
                 
         except KeyboardInterrupt:
-            print("\nGoodbye!")
             break
         except Exception as e:
-            print(f"Error: {str(e)}")
+            print(f"Error: {e}")
+    
+    print("Goodbye!")
 
 if __name__ == "__main__":
     main()
