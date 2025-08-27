@@ -35,18 +35,22 @@ def index():
         if os.path.exists("data"):
             data_files = [f for f in os.listdir("data") if f.endswith('.csv')]
         
-        # Get available tools from MCP server
-        tools = {
-            "read_csv": "Read CSV file content from data directory",
-            "get_data_stats": "Get comprehensive statistics about CSV data",
-            "get_column_info": "Get detailed information about columns in dataset",
-            "filter_data": "Filter CSV data by column value with various operations",
-            "generate_chart": "Generate charts from CSV data (bar, line, scatter, pie)",
-            "list_data_files": "List all available CSV files in the data directory",
-            "execute_script": "Execute analysis scripts"
-        }
+        # Get available tools directly from MCP server registry
+        tools = {}
+        resources = {}
         
-        resources = {"csv://{filename}": "Access CSV file content as a resource"}
+        # Extract tools and resources from MCP server using correct API
+        if hasattr(mcp, '_tool_manager') and hasattr(mcp._tool_manager, '_tools'):
+            for tool_name, tool in mcp._tool_manager._tools.items():
+                tools[tool_name] = getattr(tool, 'description', f"MCP tool: {tool_name}") or f"MCP tool: {tool_name}"
+        
+        # Try to get resources if available (FastMCP may store these differently)
+        if hasattr(mcp, '_resource_manager') and hasattr(mcp._resource_manager, '_resources'):
+            for resource_pattern, resource in mcp._resource_manager._resources.items():
+                resources[resource_pattern] = getattr(resource, 'description', f"MCP resource: {resource_pattern}") or f"MCP resource: {resource_pattern}"
+        else:
+            # Fallback for resources - may be stored differently in FastMCP
+            resources = {"csv://{filename}": "Read CSV file content as a resource"}
         
         import time
         timestamp = int(time.time())
@@ -63,7 +67,7 @@ def index():
 def chat():
     """Process natural language chat queries using MCP server"""
     try:
-        from server.server import read_csv, get_data_stats, generate_chart, list_data_files, get_column_info, filter_data, execute_script
+        from server.server import mcp
         
         data = request.get_json()
         user_query = data.get('message', '')
@@ -81,85 +85,100 @@ def chat():
         # Direct tool execution if tool_name is provided
         if tool_name:
             try:
-                if tool_name == "read_csv":
-                    filename = tool_params.get('filename', '')
-                    if filename:
-                        tool_result = read_csv(filename)
-                        tool_used = "read_csv"
-                        tool_parameters = {"filename": filename}
-                        ai_response = f"Reading {filename} from the data directory."
-                    else:
-                        ai_response = "Please provide a filename parameter."
-                        
-                elif tool_name == "get_data_stats":
-                    data_source = tool_params.get('data_source', '')
-                    if data_source:
-                        tool_result = get_data_stats(data_source)
-                        tool_used = "get_data_stats"
-                        tool_parameters = {"data_source": data_source}
-                        ai_response = f"Getting statistics for {data_source}."
-                    else:
-                        ai_response = "Please provide a data_source parameter."
-                        
-                elif tool_name == "generate_chart":
-                    data_source = tool_params.get('data_source', '')
-                    chart_type = tool_params.get('chart_type', 'bar')
-                    title = tool_params.get('title', 'Chart')
-                    x_axis = tool_params.get('x_axis', 'x')
-                    y_axis = tool_params.get('y_axis', 'y')
+                if hasattr(mcp, '_tool_manager') and tool_name in mcp._tool_manager._tools:
+                    tool = mcp._tool_manager._tools[tool_name]
+                    tool_func = tool.func
                     
-                    if data_source:
-                        tool_result = generate_chart(data_source, chart_type, title, x_axis, y_axis)
-                        tool_used = "generate_chart"
-                        tool_parameters = tool_params
-                        ai_response = f"Creating a {chart_type} chart from {data_source}."
-                    else:
-                        ai_response = "Please provide a data_source parameter."
+                    # Execute tool with parameters
+                    if tool_name == "read_csv":
+                        filename = tool_params.get('filename', '')
+                        if filename:
+                            tool_result = tool_func(filename)
+                            tool_used = tool_name
+                            tool_parameters = {"filename": filename}
+                            ai_response = f"Reading {filename} from the data directory."
+                        else:
+                            ai_response = "Please provide a filename parameter."
+                            
+                    elif tool_name == "get_data_stats":
+                        data_source = tool_params.get('data_source', '')
+                        if data_source:
+                            tool_result = tool_func(data_source)
+                            tool_used = tool_name
+                            tool_parameters = {"data_source": data_source}
+                            ai_response = f"Getting statistics for {data_source}."
+                        else:
+                            ai_response = "Please provide a data_source parameter."
+                            
+                    elif tool_name == "generate_chart":
+                        data_source = tool_params.get('data_source', '')
+                        chart_type = tool_params.get('chart_type', 'bar')
+                        title = tool_params.get('title', 'Chart')
+                        x_axis = tool_params.get('x_axis', 'x')
+                        y_axis = tool_params.get('y_axis', 'y')
                         
-                elif tool_name == "get_column_info":
-                    data_source = tool_params.get('data_source', '')
-                    column = tool_params.get('column', None)
-                    if data_source:
-                        tool_result = get_column_info(data_source, column)
-                        tool_used = "get_column_info"
-                        tool_parameters = tool_params
-                        ai_response = f"Getting column information for {data_source}."
-                    else:
-                        ai_response = "Please provide a data_source parameter."
+                        if data_source:
+                            tool_result = tool_func(data_source, chart_type, title, x_axis, y_axis)
+                            tool_used = tool_name
+                            tool_parameters = tool_params
+                            ai_response = f"Creating a {chart_type} chart from {data_source}."
+                        else:
+                            ai_response = "Please provide a data_source parameter."
+                            
+                    elif tool_name == "get_column_info":
+                        data_source = tool_params.get('data_source', '')
+                        column = tool_params.get('column', None)
+                        if data_source:
+                            tool_result = tool_func(data_source, column)
+                            tool_used = tool_name
+                            tool_parameters = tool_params
+                            ai_response = f"Getting column information for {data_source}."
+                        else:
+                            ai_response = "Please provide a data_source parameter."
+                            
+                    elif tool_name == "filter_data":
+                        data_source = tool_params.get('data_source', '')
+                        column = tool_params.get('column', '')
+                        value = tool_params.get('value', '')
+                        operation = tool_params.get('operation', 'equals')
                         
-                elif tool_name == "filter_data":
-                    data_source = tool_params.get('data_source', '')
-                    column = tool_params.get('column', '')
-                    value = tool_params.get('value', '')
-                    operation = tool_params.get('operation', 'equals')
+                        if data_source and column and value:
+                            tool_result = tool_func(data_source, column, value, operation)
+                            tool_used = tool_name
+                            tool_parameters = tool_params
+                            ai_response = f"Filtering {data_source} where {column} {operation} {value}."
+                        else:
+                            ai_response = "Please provide data_source, column, and value parameters."
+                            
+                    elif tool_name == "list_data_files":
+                        tool_result = tool_func()
+                        tool_used = tool_name
+                        tool_parameters = {}
+                        ai_response = "Listing all available CSV files in the data directory."
+                        
+                    elif tool_name == "execute_script":
+                        script_name = tool_params.get('script_name', '')
+                        csv_file = tool_params.get('csv_file', '')
+                        args = tool_params.get('args', '')
+                        
+                        if script_name and csv_file:
+                            tool_result = tool_func(script_name, csv_file, args)
+                            tool_used = tool_name
+                            tool_parameters = tool_params
+                            ai_response = f"Executing {script_name} with {csv_file}."
+                        else:
+                            ai_response = "Please provide script_name and csv_file parameters."
                     
-                    if data_source and column and value:
-                        tool_result = filter_data(data_source, column, value, operation)
-                        tool_used = "filter_data"
-                        tool_parameters = tool_params
-                        ai_response = f"Filtering {data_source} where {column} {operation} {value}."
                     else:
-                        ai_response = "Please provide data_source, column, and value parameters."
-                        
-                elif tool_name == "list_data_files":
-                    tool_result = list_data_files()
-                    tool_used = "list_data_files"
-                    tool_parameters = {}
-                    ai_response = "Listing all available CSV files in the data directory."
-                    
-                elif tool_name == "execute_script":
-                    script_name = tool_params.get('script_name', '')
-                    csv_file = tool_params.get('csv_file', '')
-                    args = tool_params.get('args', '')
-                    
-                    if script_name and csv_file:
-                        tool_result = execute_script(script_name, csv_file, args)
-                        tool_used = "execute_script"
-                        tool_parameters = tool_params
-                        ai_response = f"Executing {script_name} with {csv_file}."
-                    else:
-                        ai_response = "Please provide script_name and csv_file parameters."
-                        
+                        # Generic tool execution for other tools
+                        try:
+                            tool_result = tool_func(**tool_params)
+                            tool_used = tool_name
+                            tool_parameters = tool_params
+                            ai_response = f"Executed {tool_name} with parameters: {tool_params}"
+                        except Exception as e:
+                            ai_response = f"Error executing {tool_name}: {str(e)}"
+                            
                 else:
                     ai_response = f"Unknown tool: {tool_name}"
                     
@@ -170,14 +189,15 @@ def chat():
             # Natural language processing with intelligent tool selection
             query_lower = user_query.lower()
             
-            # Get available files first
+            # Get available files using MCP tool
             available_files = []
             try:
-                file_list_result = list_data_files()
-                if file_list_result:
-                    import json
-                    files_data = json.loads(file_list_result)
-                    available_files = files_data.get('available_files', [])
+                if hasattr(mcp, '_tool_manager') and 'list_data_files' in mcp._tool_manager._tools:
+                    tool_func = mcp._tool_manager._tools['list_data_files'].func
+                    file_list_result = tool_func()
+                    if file_list_result:
+                        files_data = json.loads(file_list_result)
+                        available_files = files_data.get('available_files', [])
             except:
                 available_files = [f for f in os.listdir('data') if f.endswith('.csv')] if os.path.exists('data') else []
             
@@ -196,10 +216,11 @@ def chat():
                         detected_file = file
                         break
             
-            # Tool selection based on query intent
+            # Tool selection based on query intent - using MCP server tools
             if any(word in query_lower for word in ['read', 'show', 'display', 'view', 'content']):
-                if detected_file:
-                    tool_result = read_csv(detected_file)
+                if detected_file and hasattr(mcp, '_tool_manager') and 'read_csv' in mcp._tool_manager._tools:
+                    tool_func = mcp._tool_manager._tools['read_csv'].func
+                    tool_result = tool_func(detected_file)
                     tool_used = "read_csv"
                     tool_parameters = {"filename": detected_file}
                     ai_response = f"Reading {detected_file} from the data directory."
@@ -207,21 +228,33 @@ def chat():
                     ai_response = f"Please specify which file to read. Available files: {', '.join(available_files)}"
                     
             elif any(word in query_lower for word in ['chart', 'graph', 'plot', 'visualiz']):
-                if detected_file:
+                if detected_file and hasattr(mcp, '_tool_manager') and 'generate_chart' in mcp._tool_manager._tools:
                     chart_type = 'bar'
                     if 'pie' in query_lower: chart_type = 'pie'
                     elif 'line' in query_lower: chart_type = 'line'
                     elif 'scatter' in query_lower: chart_type = 'scatter'
                     
-                    # Try to get column info for smart defaults
+                    # Try to get column info for smart defaults using MCP tools
                     try:
-                        import pandas as pd
-                        df = pd.read_csv(f"data/{detected_file}")
-                        columns = list(df.columns)
-                        x_axis = columns[0] if columns else 'x'
-                        y_axis = columns[1] if len(columns) > 1 else columns[0]
+                        # Use read_csv tool to get column information
+                        if hasattr(mcp, '_tool_manager') and 'read_csv' in mcp._tool_manager._tools:
+                            read_func = mcp._tool_manager._tools['read_csv'].func
+                            csv_data = read_func(detected_file)
+                            # Parse first line to get columns
+                            lines = csv_data.split('\n')
+                            if lines:
+                                columns = lines[0].split()
+                                x_axis = columns[0] if columns else 'x'
+                                y_axis = columns[1] if len(columns) > 1 else columns[0]
+                            else:
+                                x_axis = 'x'
+                                y_axis = 'y'
+                        else:
+                            x_axis = 'x'
+                            y_axis = 'y'
                         
-                        tool_result = generate_chart(detected_file, chart_type, f"{chart_type.title()} Chart", x_axis, y_axis)
+                        chart_func = mcp._tool_manager._tools['generate_chart'].func
+                        tool_result = chart_func(detected_file, chart_type, f"{chart_type.title()} Chart", x_axis, y_axis)
                         tool_used = "generate_chart"
                         tool_parameters = {"data_source": detected_file, "chart_type": chart_type, "x_axis": x_axis, "y_axis": y_axis}
                         ai_response = f"Creating a {chart_type} chart from {detected_file}."
@@ -231,8 +264,9 @@ def chat():
                     ai_response = f"Please specify which file to chart. Available files: {', '.join(available_files)}"
                     
             elif any(word in query_lower for word in ['stats', 'statistics', 'analyze', 'summary']):
-                if detected_file:
-                    tool_result = get_data_stats(detected_file)
+                if detected_file and hasattr(mcp, '_tool_manager') and 'get_data_stats' in mcp._tool_manager._tools:
+                    tool_func = mcp._tool_manager._tools['get_data_stats'].func
+                    tool_result = tool_func(detected_file)
                     tool_used = "get_data_stats"
                     tool_parameters = {"data_source": detected_file}
                     ai_response = f"Getting comprehensive statistics for {detected_file}."
@@ -240,8 +274,9 @@ def chat():
                     ai_response = f"Please specify which file to analyze. Available files: {', '.join(available_files)}"
                     
             elif any(word in query_lower for word in ['column', 'field', 'info']):
-                if detected_file:
-                    tool_result = get_column_info(detected_file)
+                if detected_file and hasattr(mcp, '_tool_manager') and 'get_column_info' in mcp._tool_manager._tools:
+                    tool_func = mcp._tool_manager._tools['get_column_info'].func
+                    tool_result = tool_func(detected_file)
                     tool_used = "get_column_info"
                     tool_parameters = {"data_source": detected_file}
                     ai_response = f"Getting column information for {detected_file}."
@@ -249,16 +284,26 @@ def chat():
                     ai_response = f"Please specify which file to examine. Available files: {', '.join(available_files)}"
                     
             elif any(word in query_lower for word in ['list', 'files', 'available']):
-                tool_result = list_data_files()
-                tool_used = "list_data_files"
-                tool_parameters = {}
-                ai_response = "Here are all available CSV files in the data directory."
+                if hasattr(mcp, '_tool_manager') and 'list_data_files' in mcp._tool_manager._tools:
+                    tool_func = mcp._tool_manager._tools['list_data_files'].func
+                    tool_result = tool_func()
+                    tool_used = "list_data_files"
+                    tool_parameters = {}
+                    ai_response = "Here are all available CSV files in the data directory."
+                else:
+                    ai_response = "File listing tool not available."
                 
             else:
-                tool_result = list_data_files()
-                tool_used = "list_data_files"
-                tool_parameters = {}
-                ai_response = f"I can help you analyze CSV data. Available files: {', '.join(available_files)}. Try asking to 'read', 'chart', or 'analyze' a specific file."
+                # Default: show available files and capabilities
+                if hasattr(mcp, '_tool_manager') and 'list_data_files' in mcp._tool_manager._tools:
+                    tool_func = mcp._tool_manager._tools['list_data_files'].func
+                    tool_result = tool_func()
+                    tool_used = "list_data_files"
+                    tool_parameters = {}
+                    ai_response = f"I can help you analyze CSV data. Available files: {', '.join(available_files)}. Try asking to 'read', 'chart', or 'analyze' a specific file."
+                else:
+                    tool_names = list(mcp._tool_manager._tools.keys()) if hasattr(mcp, '_tool_manager') and hasattr(mcp._tool_manager, '_tools') else []
+                    ai_response = f"I can help you analyze CSV data. Available tools: {', '.join(tool_names)}. Try asking about a specific file or tool."
         
         return jsonify({
             'success': True,
@@ -308,23 +353,37 @@ def upload_file():
 
 @app.route('/api/tools')
 def get_tools():
-    """Get available tools and resources"""
+    """Get available tools and resources from MCP server"""
     try:
-        # Get available data files
+        from server.server import mcp
+        
+        # Get available data files using MCP tool if available
         data_files = []
-        if os.path.exists("data"):
-            data_files = [f for f in os.listdir("data") if f.endswith('.csv')]
+        try:
+            if hasattr(mcp, '_tool_manager') and 'list_data_files' in mcp._tool_manager._tools:
+                tool_func = mcp._tool_manager._tools['list_data_files'].func
+                file_list_result = tool_func()
+                if file_list_result:
+                    files_data = json.loads(file_list_result)
+                    data_files = files_data.get('available_files', [])
+        except:
+            if os.path.exists("data"):
+                data_files = [f for f in os.listdir("data") if f.endswith('.csv')]
         
-        tools = {
-            "read_csv": "Read CSV file content from data directory",
-            "get_data_stats": "Get comprehensive statistics about CSV data",
-            "get_column_info": "Get detailed information about columns in dataset",
-            "filter_data": "Filter CSV data by column value with various operations",
-            "generate_chart": "Generate charts from CSV data (bar, line, scatter, pie)",
-            "list_data_files": "List all available CSV files in the data directory"
-        }
+        # Get tools directly from MCP server registry using correct API
+        tools = {}
+        if hasattr(mcp, '_tool_manager') and hasattr(mcp._tool_manager, '_tools'):
+            for tool_name, tool in mcp._tool_manager._tools.items():
+                tools[tool_name] = getattr(tool, 'description', f"MCP tool: {tool_name}") or f"MCP tool: {tool_name}"
         
-        resources = {"csv://{filename}": "Access CSV file content as a resource"}
+        # Get resources from MCP server registry
+        resources = {}
+        if hasattr(mcp, '_resource_manager') and hasattr(mcp._resource_manager, '_resources'):
+            for resource_pattern, resource in mcp._resource_manager._resources.items():
+                resources[resource_pattern] = getattr(resource, 'description', f"MCP resource: {resource_pattern}") or f"MCP resource: {resource_pattern}"
+        else:
+            # Fallback for resources
+            resources = {"csv://{filename}": "Read CSV file content as a resource"}
         
         return jsonify({
             'success': True,
