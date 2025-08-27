@@ -30,79 +30,83 @@ sys.path.insert(0, str(current_dir))
 # Initialize Flask app
 app = Flask(__name__)
 
-# MCP Client class for proper server communication
+# Simplified MCP client that works directly with the server module
 class MCPClient:
     def __init__(self):
-        self.session: Optional[ClientSession] = None
-        self.exit_stack = AsyncExitStack()
-        self.server_process = None
+        self.mcp_server = None
+        self.connected = False
     
-    async def connect_to_server(self, server_script_path: str = "server/server.py"):
-        """Connect to MCP server via stdio"""
-        if not ClientSession:
-            raise RuntimeError("MCP client libraries not available")
-            
-        server_params = StdioServerParameters(
-            command="python",
-            args=[server_script_path],
-            env=None
-        )
-        
-        stdio_transport = await self.exit_stack.enter_async_context(
-            stdio_client(server_params)
-        )
-        self.stdio, self.write = stdio_transport
-        self.session = await self.exit_stack.enter_async_context(
-            ClientSession(self.stdio, self.write)
-        )
-        
-        await self.session.initialize()
-        
-    async def call_tool(self, tool_name: str, tool_args: dict):
-        """Call a tool on the MCP server"""
-        if not self.session:
-            raise RuntimeError("Not connected to MCP server")
-            
-        result = await self.session.call_tool(tool_name, tool_args)
-        return result.content
-    
-    async def list_tools(self):
-        """List available tools from MCP server"""
-        if not self.session:
-            raise RuntimeError("Not connected to MCP server")
-            
-        response = await self.session.list_tools()
-        return [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.inputSchema
-            }
-            for tool in response.tools
-        ]
-    
-    async def list_resources(self):
-        """List available resources from MCP server"""
-        if not self.session:
-            raise RuntimeError("Not connected to MCP server")
-            
+    def connect_to_server(self):
+        """Connect to MCP server by importing it directly"""
         try:
-            response = await self.session.list_resources()
-            return [
-                {
-                    "uri": resource.uri,
-                    "name": resource.name,
-                    "description": resource.description,
-                    "mimeType": resource.mimeType
-                }
-                for resource in response.resources
-            ]
-        except Exception:
-            return []  # Resources might not be implemented
+            from server.server import mcp
+            self.mcp_server = mcp
+            self.connected = True
+            return True
+        except Exception as e:
+            print(f"Error connecting to MCP server: {e}")
+            self.connected = False
+            return False
     
-    async def cleanup(self):
-        """Clean up resources"""
-        await self.exit_stack.aclose()
+    def call_tool(self, tool_name: str, tool_args: dict):
+        """Call a tool on the MCP server"""
+        if not self.connected:
+            if not self.connect_to_server():
+                raise RuntimeError("Cannot connect to MCP server")
+        
+        # Access tools directly from the FastMCP server
+        if hasattr(self.mcp_server, '_tool_manager') and tool_name in self.mcp_server._tool_manager._tools:
+            tool = self.mcp_server._tool_manager._tools[tool_name]
+            tool_func = tool.function if hasattr(tool, 'function') else getattr(tool, 'func', None)
+            
+            if tool_func:
+                return tool_func(**tool_args)
+            else:
+                raise RuntimeError(f"Tool function not found for {tool_name}")
+        else:
+            raise RuntimeError(f"Tool {tool_name} not found")
+    
+    def list_tools(self):
+        """List available tools from MCP server"""
+        if not self.connected:
+            if not self.connect_to_server():
+                return []
+        
+        tools = []
+        if hasattr(self.mcp_server, '_tool_manager') and hasattr(self.mcp_server._tool_manager, '_tools'):
+            for tool_name, tool in self.mcp_server._tool_manager._tools.items():
+                tools.append({
+                    "name": tool_name,
+                    "description": getattr(tool, 'description', f"MCP tool: {tool_name}") or f"MCP tool: {tool_name}"
+                })
+        return tools
+    
+    def list_resources(self):
+        """List available resources from MCP server"""
+        if not self.connected:
+            if not self.connect_to_server():
+                return []
+        
+        resources = []
+        if hasattr(self.mcp_server, '_resource_manager') and hasattr(self.mcp_server._resource_manager, '_resources'):
+            for resource_pattern, resource in self.mcp_server._resource_manager._resources.items():
+                resources.append({
+                    "uri": resource_pattern,
+                    "name": resource_pattern,
+                    "description": getattr(resource, 'description', f"MCP resource: {resource_pattern}") or f"MCP resource: {resource_pattern}",
+                    "mimeType": "text/csv"
+                })
+        else:
+            # Fallback resources
+            resources = [
+                {
+                    "uri": "csv://{filename}",
+                    "name": "CSV Files",
+                    "description": "Read CSV file content as a resource",
+                    "mimeType": "text/csv"
+                }
+            ]
+        return resources
 
 # Global MCP client instance
 mcp_client = MCPClient()
@@ -123,8 +127,8 @@ def index():
         if os.path.exists("data"):
             data_files = [f for f in os.listdir("data") if f.endswith('.csv')]
         
-        # Get tools and resources using async MCP client
-        result = asyncio.run(get_mcp_info_async())
+        # Get tools and resources using MCP client
+        result = get_mcp_info_sync()
         
         import time
         timestamp = int(time.time())
@@ -138,18 +142,18 @@ def index():
         return f"Error loading chat interface: {str(e)}", 500
 
 
-async def get_mcp_info_async():
-    """Get tools and resources from MCP server"""
+def get_mcp_info_sync():
+    """Get tools and resources from MCP server (synchronous version)"""
     global mcp_client
     
     try:
         # Connect to MCP server if not already connected
-        if not mcp_client.session:
-            await mcp_client.connect_to_server()
+        if not mcp_client.connected:
+            mcp_client.connect_to_server()
         
         # Get tools and resources
-        tools_list = await mcp_client.list_tools()
-        resources_list = await mcp_client.list_resources()
+        tools_list = mcp_client.list_tools()
+        resources_list = mcp_client.list_resources()
         
         tools = {tool['name']: tool['description'] for tool in tools_list}
         resources = {resource['uri']: resource['description'] for resource in resources_list}
@@ -175,8 +179,8 @@ def chat():
         if not user_query and not tool_name:
             return jsonify({'error': 'Message or tool name is required'}), 400
         
-        # Run async function in sync context
-        result = asyncio.run(process_query_async(user_query, tool_name, tool_params))
+        # Use synchronous function to avoid async issues
+        result = process_query_sync(user_query, tool_name, tool_params)
         return jsonify(result)
         
     except Exception as e:
@@ -186,14 +190,14 @@ def chat():
         }), 500
 
 
-async def process_query_async(user_query: str, tool_name: str = None, tool_params: dict = None):
-    """Process query using MCP client"""
+def process_query_sync(user_query: str, tool_name: str = None, tool_params: dict = None):
+    """Process query using MCP client (synchronous version)"""
     global mcp_client
     
     try:
         # Connect to MCP server if not already connected
-        if not mcp_client.session:
-            await mcp_client.connect_to_server()
+        if not mcp_client.connected:
+            mcp_client.connect_to_server()
         
         tool_result = None
         tool_used = None
@@ -206,7 +210,7 @@ async def process_query_async(user_query: str, tool_name: str = None, tool_param
                 # Use MCP client to call tool
                 if tool_name in ["read_csv", "get_data_stats", "generate_chart", 
                                "get_column_info", "filter_data", "list_data_files", "execute_script"]:
-                    tool_result = await mcp_client.call_tool(tool_name, tool_params)
+                    tool_result = mcp_client.call_tool(tool_name, tool_params)
                     tool_used = tool_name
                     tool_parameters = tool_params
                     ai_response = f"Executed {tool_name} successfully."
@@ -222,9 +226,9 @@ async def process_query_async(user_query: str, tool_name: str = None, tool_param
             # Get available files using MCP client
             available_files = []
             try:
-                file_list_result = await mcp_client.call_tool("list_data_files", {})
+                file_list_result = mcp_client.call_tool("list_data_files", {})
                 if file_list_result:
-                    files_data = json.loads(file_list_result[0]['text']) if isinstance(file_list_result, list) else json.loads(file_list_result)
+                    files_data = json.loads(file_list_result)
                     available_files = files_data.get('available_files', [])
             except:
                 available_files = [f for f in os.listdir('data') if f.endswith('.csv')] if os.path.exists('data') else []
@@ -247,7 +251,7 @@ async def process_query_async(user_query: str, tool_name: str = None, tool_param
             # Tool selection based on query intent
             if any(word in query_lower for word in ['read', 'show', 'display', 'view', 'content']):
                 if detected_file:
-                    tool_result = await mcp_client.call_tool("read_csv", {"filename": detected_file})
+                    tool_result = mcp_client.call_tool("read_csv", {"filename": detected_file})
                     tool_used = "read_csv"
                     tool_parameters = {"filename": detected_file}
                     ai_response = f"Reading {detected_file} from the data directory."
@@ -263,14 +267,9 @@ async def process_query_async(user_query: str, tool_name: str = None, tool_param
                     
                     # Get basic column info for defaults
                     try:
-                        csv_data = await mcp_client.call_tool("read_csv", {"filename": detected_file})
+                        csv_data = mcp_client.call_tool("read_csv", {"filename": detected_file})
                         # Simple parsing to get column names
-                        if isinstance(csv_data, list):
-                            csv_text = csv_data[0]['text'] if csv_data else ""
-                        else:
-                            csv_text = csv_data
-                        
-                        lines = csv_text.split('\n') if csv_text else []
+                        lines = csv_data.split('\n') if csv_data else []
                         if lines:
                             columns = lines[0].split()
                             x_axis = columns[0] if columns else 'x'
@@ -282,7 +281,7 @@ async def process_query_async(user_query: str, tool_name: str = None, tool_param
                         x_axis = 'x'
                         y_axis = 'y'
                     
-                    tool_result = await mcp_client.call_tool("generate_chart", {
+                    tool_result = mcp_client.call_tool("generate_chart", {
                         "data_source": detected_file,
                         "chart_type": chart_type,
                         "title": f"{chart_type.title()} Chart",
@@ -297,7 +296,7 @@ async def process_query_async(user_query: str, tool_name: str = None, tool_param
                     
             elif any(word in query_lower for word in ['stats', 'statistics', 'analyze', 'summary']):
                 if detected_file:
-                    tool_result = await mcp_client.call_tool("get_data_stats", {"data_source": detected_file})
+                    tool_result = mcp_client.call_tool("get_data_stats", {"data_source": detected_file})
                     tool_used = "get_data_stats"
                     tool_parameters = {"data_source": detected_file}
                     ai_response = f"Getting comprehensive statistics for {detected_file}."
@@ -306,7 +305,7 @@ async def process_query_async(user_query: str, tool_name: str = None, tool_param
                     
             elif any(word in query_lower for word in ['column', 'field', 'info']):
                 if detected_file:
-                    tool_result = await mcp_client.call_tool("get_column_info", {"data_source": detected_file})
+                    tool_result = mcp_client.call_tool("get_column_info", {"data_source": detected_file})
                     tool_used = "get_column_info"
                     tool_parameters = {"data_source": detected_file}
                     ai_response = f"Getting column information for {detected_file}."
@@ -314,14 +313,14 @@ async def process_query_async(user_query: str, tool_name: str = None, tool_param
                     ai_response = f"Please specify which file to examine. Available files: {', '.join(available_files)}"
                     
             elif any(word in query_lower for word in ['list', 'files', 'available']):
-                tool_result = await mcp_client.call_tool("list_data_files", {})
+                tool_result = mcp_client.call_tool("list_data_files", {})
                 tool_used = "list_data_files"
                 tool_parameters = {}
                 ai_response = "Here are all available CSV files in the data directory."
             
             else:
                 # Default: show available files and capabilities
-                tool_result = await mcp_client.call_tool("list_data_files", {})
+                tool_result = mcp_client.call_tool("list_data_files", {})
                 tool_used = "list_data_files"
                 tool_parameters = {}
                 ai_response = f"I can help you analyze CSV data. Available files: {', '.join(available_files)}. Try asking to 'read', 'chart', or 'analyze' a specific file."
@@ -377,7 +376,7 @@ def get_tools():
     """Get available tools and resources from MCP server"""
     try:
         # Get tools, resources, and data files using MCP client
-        result = asyncio.run(get_tools_async())
+        result = get_tools_sync()
         return jsonify(result)
         
     except Exception as e:
@@ -387,29 +386,29 @@ def get_tools():
         }), 500
 
 
-async def get_tools_async():
-    """Get tools and resources using MCP client"""
+def get_tools_sync():
+    """Get tools and resources using MCP client (synchronous version)"""
     global mcp_client
     
     try:
         # Connect to MCP server if not already connected
-        if not mcp_client.session:
-            await mcp_client.connect_to_server()
+        if not mcp_client.connected:
+            mcp_client.connect_to_server()
         
         # Get available data files using MCP tool
         data_files = []
         try:
-            file_list_result = await mcp_client.call_tool("list_data_files", {})
+            file_list_result = mcp_client.call_tool("list_data_files", {})
             if file_list_result:
-                files_data = json.loads(file_list_result[0]['text']) if isinstance(file_list_result, list) else json.loads(file_list_result)
+                files_data = json.loads(file_list_result)
                 data_files = files_data.get('available_files', [])
         except:
             if os.path.exists("data"):
                 data_files = [f for f in os.listdir("data") if f.endswith('.csv')]
         
         # Get tools and resources
-        tools_list = await mcp_client.list_tools()
-        resources_list = await mcp_client.list_resources()
+        tools_list = mcp_client.list_tools()
+        resources_list = mcp_client.list_resources()
         
         tools = {tool['name']: tool['description'] for tool in tools_list}
         resources = {resource['uri']: resource['description'] for resource in resources_list}
