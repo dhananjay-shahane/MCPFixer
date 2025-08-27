@@ -42,7 +42,9 @@ def index():
         print(f"DEBUG: tools = {tools}")
         print(f"DEBUG: resources = {resources}")
         
-        return render_template('chat.html', data_files=data_files, tools=tools, resources=resources)
+        import time
+        timestamp = int(time.time())
+        return render_template('chat.html', data_files=data_files, tools=tools, resources=resources, timestamp=timestamp)
     except Exception as e:
         print(f"ERROR loading chat interface: {str(e)}")
         return f"Error loading chat interface: {str(e)}", 500
